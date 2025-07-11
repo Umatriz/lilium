@@ -1,8 +1,5 @@
 use core::panic::{self, PanicMessage};
-use std::{
-    fmt::{Display, Write},
-    mem,
-};
+use std::fmt::{Display, Write};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
@@ -196,7 +193,33 @@ impl Display for Expr {
 
 fn expr(lexer: &mut Lexer, min_bp: u8) -> Expr {
     let Token { kind, data } = lexer.next_token();
-    let lhs = Operation::from_kind(kind);
+    let mut lhs = Expr::Item(
+        Item::from_kind(kind).unwrap_or_else(|| panic!("Bad token: {data}")),
+        data,
+    );
+
+    loop {
+        let Some(Token { kind, data }) = lexer.peek_token() else {
+            break;
+        };
+
+        if matches!(kind, TokenKind::Eof) {
+            break;
+        }
+
+        let op = Operation::from_kind(*kind).unwrap_or_else(|| panic!("Bad token: {data}"));
+
+        let (l_bp, r_bp) = infix_binding_power(op);
+        if dbg!(l_bp) < dbg!(min_bp) {
+            break;
+        }
+
+        lexer.next_token();
+        let rhs = expr(lexer, r_bp);
+        lhs = Expr::Op(op, vec![lhs, rhs]);
+    }
+
+    lhs
 }
 
 fn infix_binding_power(op: Operation) -> (u8, u8) {
@@ -216,8 +239,8 @@ fn test() {
     assert_eq!(s.to_string(), "187312");
 
     let s = expr(&mut Lexer::new("1 + 2 * 3"), 0);
-    assert_eq!(s.to_string(), "(+ 1 (* 2 3))");
+    assert_eq!(s.to_string(), "(1 + (2 * 3))");
 
     let s = expr(&mut Lexer::new("a + b * c * d + e"), 0);
-    assert_eq!(s.to_string(), "(+ (+ a (* (* b c) d)) e)");
+    assert_eq!(s.to_string(), "((a + ((b * c) * d)) + e)");
 }
