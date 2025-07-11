@@ -1,0 +1,8 @@
+fun main {
+	a = 35
+	b = 34
+	c = add(a, b)
+	print("{c}")
+}
+
+fun add(int a int b) -> int :: a + b
