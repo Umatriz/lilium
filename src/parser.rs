@@ -184,10 +184,36 @@ impl Display for Operation {
 
 impl Display for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Expr::Item(_item, data) => write!(f, "{data}"),
-            Expr::Op(operation, exprs) => write!(f, "({} {operation} {})", exprs[0], exprs[1]),
+        fn format(
+            f: &mut std::fmt::Formatter<'_>,
+            expr: &Expr,
+            is_first: &mut bool,
+        ) -> std::fmt::Result {
+            match expr {
+                Expr::Item(_item, data) => {
+                    write!(f, "{data}")?;
+                }
+                Expr::Op(operation, exprs) => {
+                    if *is_first {
+                        *is_first = false;
+                        format(f, &exprs[0], is_first)?;
+                        write!(f, " {} ", operation)?;
+                        format(f, &exprs[1], is_first)?;
+                    } else {
+                        write!(f, "(")?;
+                        format(f, &exprs[0], is_first)?;
+                        write!(f, " {} ", operation)?;
+                        format(f, &exprs[1], is_first)?;
+                        write!(f, ")")?;
+                    }
+                }
+            }
+
+            Ok(())
         }
+
+        let mut state = true;
+        format(f, self, &mut state)
     }
 }
 
@@ -210,7 +236,7 @@ fn expr(lexer: &mut Lexer, min_bp: u8) -> Expr {
         let op = Operation::from_kind(*kind).unwrap_or_else(|| panic!("Bad token: {data}"));
 
         let (l_bp, r_bp) = infix_binding_power(op);
-        if dbg!(l_bp) < dbg!(min_bp) {
+        if l_bp < min_bp {
             break;
         }
 
@@ -239,8 +265,8 @@ fn test() {
     assert_eq!(s.to_string(), "187312");
 
     let s = expr(&mut Lexer::new("1 + 2 * 3"), 0);
-    assert_eq!(s.to_string(), "(1 + (2 * 3))");
+    assert_eq!(s.to_string(), "1 + (2 * 3)");
 
     let s = expr(&mut Lexer::new("a + b * c * d + e"), 0);
-    assert_eq!(s.to_string(), "((a + ((b * c) * d)) + e)");
+    assert_eq!(s.to_string(), "(a + ((b * c) * d)) + e");
 }
