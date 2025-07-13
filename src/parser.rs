@@ -161,12 +161,13 @@ impl Lexer {
         Self { tokens }
     }
 
-    fn parse_tokens2(source: &str) -> Vec<Token> {
-        fn t<I, O, F>(inp: &mut I, combinator_out: Option<(I, O)>, fun: Fn(O))
-        where
-            F: Fn(O),
-        {
-            if let Some((i, out)) = combinator_out {
+    pub fn parse_tokens2(source: &str) -> Vec<Token> {
+        fn t<I: Copy, O>(
+            inp: &mut I,
+            combinator: impl Combinator<I, Output = O>,
+            fun: impl FnOnce(O),
+        ) {
+            if let Some((i, out)) = combinator.process(*inp) {
                 *inp = i;
                 fun(out)
             }
@@ -180,69 +181,89 @@ impl Lexer {
             tokens.push(Token::new(kind, data));
         };
 
-        let mut inp = source;
+        let mut i = source;
 
-        while !inp.is_empty() {
+        while !i.is_empty() {
             // Tabs and whitespaces
-            t(&mut inp, tag(" ")(inp), skip);
-            t(&mut inp, tag("\t")(inp), skip);
+            t(&mut i, tag(" "), skip);
+            t(&mut i, tag("\t"), skip);
 
             // Newlines
-            if let Some((i, tag)) = tag("\r\n")(inp) {
-                inp = i;
-                push_t(TokenKind::NewLine, tag);
-            }
-            if let Some((i, tag)) = tag("\n")(inp) {
-                inp = i;
-                push_t(TokenKind::NewLine, "NEW_LINE");
-            }
-            if let Some((i, tag)) = tag("\r")(inp) {
-                inp = i;
-                push_t(TokenKind::NewLine, "NEW_LINE");
-            }
+            t(&mut i, tag("\r\n"), |_| {
+                push_t(TokenKind::NewLine, "NEW_LINE")
+            });
+            t(&mut i, tag("\n"), |_| {
+                push_t(TokenKind::NewLine, "NEW_LINE")
+            });
+            t(&mut i, tag("\r"), |_| {
+                push_t(TokenKind::NewLine, "NEW_LINE")
+            });
+
+            // Delimiters
+            t(&mut i, tag("("), |o| push_t(TokenKind::LeftParen, o));
+            t(&mut i, tag(")"), |o| push_t(TokenKind::RightParen, o));
+            t(&mut i, tag("["), |o| push_t(TokenKind::LeftBracket, o));
+            t(&mut i, tag("]"), |o| push_t(TokenKind::RightBracket, o));
+            t(&mut i, tag("{"), |o| push_t(TokenKind::LeftBrace, o));
+            t(&mut i, tag("}"), |o| push_t(TokenKind::RightBrace, o));
+
+            // Arrows
+            t(&mut i, tag("->"), |o| push_t(TokenKind::ArrawRight, o));
+            t(&mut i, tag("|->"), |o| push_t(TokenKind::LambdaStart, o));
+            t(&mut i, tag("=>"), |o| push_t(TokenKind::ArrawRightBold, o));
 
             // Operations
-            if let Some((i, tag)) = tag("(")(inp) {
-                inp = i;
-                push_t(TokenKind::LeftParen, tag);
-                continue;
-            }
-            if let Some((i, tag)) = tag(")")(inp) {
-                inp = i;
-                push_t(TokenKind::RightParen, tag);
-                continue;
-            }
-            if let Some((i, tag)) = tag("[")(inp) {
-                inp = i;
-                push_t(TokenKind::LeftBracket, tag);
-                continue;
-            }
-            if let Some((i, tag)) = tag("]")(inp) {
-                inp = i;
-                push_t(TokenKind::RightBracket, tag);
-                continue;
-            }
-            if let Some((i, tag)) = tag("{")(inp) {
-                inp = i;
-                push_t(TokenKind::LeftBrace, tag);
-                continue;
-            }
-            if let Some((i, tag)) = tag("}")(inp) {
-                inp = i;
-                push_t(TokenKind::RightBrace, tag);
-                continue;
-            }
-            if let Some((i, tag)) = tag("+")(inp) {
-                inp = i;
-                push_t(TokenKind::Plus, tag);
-                continue;
-            }
+            t(&mut i, tag("+"), |o| push_t(TokenKind::Plus, o));
+            t(&mut i, tag("-"), |o| push_t(TokenKind::Minus, o));
+            t(&mut i, tag("*"), |o| push_t(TokenKind::Star, o));
+            t(&mut i, tag("/"), |o| push_t(TokenKind::Slash, o));
+            t(&mut i, tag("="), |o| push_t(TokenKind::Equal, o));
+
+            t(&mut i, tag("!"), |o| push_t(TokenKind::ExplanationMark, o));
+            t(&mut i, tag("?"), |o| push_t(TokenKind::QuestionMark, o));
+            t(&mut i, tag(":"), |o| push_t(TokenKind::Colon, o));
+            t(&mut i, tag(","), |o| push_t(TokenKind::Comma, o));
+
+            // Literal
+            t(
+                &mut i,
+                (tag("\""), take_till(|c| c == '\"'), tag("\"")),
+                |(_, literal, _)| push_t(TokenKind::Literal, literal),
+            );
+
+            // Number
+            t(&mut i, take_while(|c| c.is_ascii_digit()), |o| {
+                push_t(TokenKind::Number, o)
+            });
+
+            // Identifier
+            t(
+                &mut i,
+                (
+                    // Idents can't start from numbers so we use two `take_while`s
+                    take_while(|c| c.is_ascii_alphabetic()),
+                    take_while(|c| c.is_ascii_alphanumeric()),
+                ),
+                |(first, second)| {
+                    let mut s = String::new();
+                    s.push_str(first);
+                    s.push_str(second);
+                    push_t(TokenKind::Ident, &s);
+                },
+            );
+
+            // Comment
+            t(
+                &mut i,
+                (tag("//"), take_till(|c| c == '\n' || c == '\r')),
+                skip,
+            );
         }
 
         tokens
     }
 
-    fn parse_tokens(source: &str) -> Vec<Token> {
+    pub fn parse_tokens(source: &str) -> Vec<Token> {
         let mut tokens = Vec::new();
 
         let mut chars = source.chars().peekable();
@@ -289,7 +310,6 @@ impl Lexer {
                         panic!("Unexpected token");
                     };
                 }
-
                 '\"' => {
                     let mut content = String::new();
                     while let Some(c) = chars.next_if(|c| *c != '\"') {
