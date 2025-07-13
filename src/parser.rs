@@ -1,13 +1,9 @@
-use core::panic::{self, PanicMessage};
-use std::{
-    arch::x86_64::_mm_extract_ps,
-    fmt::{Display, Write},
-};
+use std::fmt::Display;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
     Plus,
-    Munis,
+    Minus,
     Star,
     Slash,
     // Operation(Operation),
@@ -75,7 +71,7 @@ impl Lexer {
                 '{' => tokens.push(Token::new(TokenKind::LeftBrace, c)),
                 '}' => tokens.push(Token::new(TokenKind::RightBrace, c)),
                 '+' => tokens.push(Token::new(TokenKind::Plus, c)),
-                '-' => tokens.push(Token::new(TokenKind::Munis, c)),
+                '-' => tokens.push(Token::new(TokenKind::Minus, c)),
                 '*' => tokens.push(Token::new(TokenKind::Star, c)),
                 '=' => tokens.push(Token::new(TokenKind::Equal, c)),
                 '!' => tokens.push(Token::new(TokenKind::ExplanationMark, c)),
@@ -137,7 +133,7 @@ impl Display for Lexer {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
     Item(Item, String),
-    Op(OperationToken, OperationKind, Vec<Expr>),
+    Op(TokenKind, OperationKind, Vec<Expr>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,32 +154,32 @@ impl Item {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OperationToken {
-    Plus,
-    Minus,
-    Star,
-    Slash,
-    ExplanationMark,
-    LeftBracket,
-    QuestionMark,
-}
+// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// enum OperationToken {
+//     Plus,
+//     Minus,
+//     Star,
+//     Slash,
+//     ExplanationMark,
+//     LeftBracket,
+//     QuestionMark,
+// }
 
-impl OperationToken {
-    fn from_kind(kind: TokenKind) -> Option<Self> {
-        use TokenKind::*;
-        let op = match kind {
-            Plus => Self::Plus,
-            Munis => Self::Minus,
-            Star => Self::Star,
-            Slash => Self::Slash,
-            ExplanationMark => Self::ExplanationMark,
-            LeftBracket => Self::LeftBracket,
-            _ => return None,
-        };
-        Some(op)
-    }
-}
+// impl OperationToken {
+//     fn from_kind(kind: TokenKind) -> Option<Self> {
+//         use TokenKind::*;
+//         let op = match kind {
+//             Plus => Self::Plus,
+//             Munis => Self::Minus,
+//             Star => Self::Star,
+//             Slash => Self::Slash,
+//             ExplanationMark => Self::ExplanationMark,
+//             LeftBracket => Self::LeftBracket,
+//             _ => return None,
+//         };
+//         Some(op)
+//     }
+// }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OperationKind {
@@ -191,20 +187,22 @@ enum OperationKind {
     Unary,
     Postfix,
     Ternary,
+    Indexing,
 }
 
-impl Display for OperationToken {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl TokenKind {
+    fn format_op(&self) -> Option<&str> {
         let op = match self {
-            OperationToken::Plus => "+",
-            OperationToken::Minus => "-",
-            OperationToken::Star => "*",
-            OperationToken::Slash => "/",
-            OperationToken::ExplanationMark => "!",
-            OperationToken::LeftBracket => "[",
-            OperationToken::QuestionMark => "?",
+            Self::Plus => "+",
+            Self::Minus => "-",
+            Self::Star => "*",
+            Self::Slash => "/",
+            Self::ExplanationMark => "!",
+            Self::LeftBracket => "[",
+            Self::QuestionMark => "?",
+            _ => return None,
         };
-        write!(f, "{op}")
+        Some(op)
     }
 }
 
@@ -229,29 +227,32 @@ impl Display for Expr {
                         write!(f, "(")?;
                     }
 
-                    // TODO: Fix this mostrosity
-                    match exprs.len() {
-                        1 if matches!(kind, OperationKind::Unary) => {
-                            write!(f, "{operation}")?;
+                    match kind {
+                        OperationKind::Binary => {
                             format(f, &exprs[0], is_first)?;
-                        }
-                        1 if matches!(kind, OperationKind::Postfix) => {
-                            format(f, &exprs[0], is_first)?;
-                            write!(f, "{operation}")?;
-                        }
-                        2 if matches!(kind, OperationKind::Binary) => {
-                            format(f, &exprs[0], is_first)?;
-                            write!(f, " {operation} ")?;
+                            write!(f, " {} ", operation.format_op().unwrap())?;
                             format(f, &exprs[1], is_first)?;
                         }
-                        _ => {
-                            write!(f, "{{")?;
-                            write!(f, "{operation}")?;
-                            for e in exprs {
-                                write!(f, " ")?;
-                                format(f, e, is_first)?;
-                            }
-                            write!(f, "}}")?;
+                        OperationKind::Unary => {
+                            write!(f, "{}", operation.format_op().unwrap())?;
+                            format(f, &exprs[0], is_first)?;
+                        }
+                        OperationKind::Postfix => {
+                            format(f, &exprs[0], is_first)?;
+                            write!(f, "{}", operation.format_op().unwrap())?;
+                        }
+                        OperationKind::Ternary => {
+                            format(f, &exprs[0], is_first)?;
+                            write!(f, " ? ")?;
+                            format(f, &exprs[1], is_first)?;
+                            write!(f, " : ")?;
+                            format(f, &exprs[2], is_first)?;
+                        }
+                        OperationKind::Indexing => {
+                            format(f, &exprs[0], is_first)?;
+                            write!(f, "[")?;
+                            format(f, &exprs[1], is_first)?;
+                            write!(f, "]")?;
                         }
                     }
 
@@ -271,12 +272,12 @@ impl Display for Expr {
 
 fn expr(lexer: &mut Lexer, min_bp: u8) -> Expr {
     let Token { kind, data } = lexer.next_token();
+    // TODO: Use match somehow...
     let mut lhs = if let Some(item) = Item::from_kind(kind) {
         Expr::Item(item, data)
-    } else if let Some(op) = OperationToken::from_kind(kind) {
-        let (_, r_bp) = binding_power(op, OperationKind::Unary).unwrap();
+    } else if let Some((_, r_bp)) = binding_power(kind, OperationKind::Unary) {
         let rhs = expr(lexer, r_bp);
-        Expr::Op(op, OperationKind::Unary, vec![rhs])
+        Expr::Op(kind, OperationKind::Unary, vec![rhs])
     } else if let TokenKind::LeftParen = kind {
         let lhs = expr(lexer, 0);
         assert_eq!(lexer.next_token(), Token::new(TokenKind::RightParen, ")"));
@@ -293,43 +294,46 @@ fn expr(lexer: &mut Lexer, min_bp: u8) -> Expr {
         if matches!(kind, TokenKind::Eof) {
             break;
         }
-        let Some(op) = OperationToken::from_kind(*kind) else {
-            break;
-        };
+        let kind = *kind;
 
-        if let Some((l_bp, _)) = binding_power(op, OperationKind::Postfix) {
+        if let Some((l_bp, _)) = binding_power(kind, OperationKind::Postfix) {
             if l_bp < min_bp {
                 break;
             }
             lexer.next_token();
 
-            lhs = if op == OperationToken::LeftBracket {
+            lhs = if kind == TokenKind::LeftBracket {
                 let rhs = expr(lexer, 0);
                 assert_eq!(lexer.next_token(), Token::new(TokenKind::RightBracket, "]"));
-                Expr::Op(op, OperationKind::Postfix, vec![lhs, rhs])
+                Expr::Op(kind, OperationKind::Indexing, vec![lhs, rhs])
             } else {
-                Expr::Op(op, OperationKind::Postfix, vec![lhs])
+                Expr::Op(kind, OperationKind::Postfix, vec![lhs])
             };
 
             continue;
         }
 
-        let (l_bp, r_bp) = binding_power(op, OperationKind::Binary).unwrap();
-        if l_bp < min_bp {
-            break;
-        }
-        lexer.next_token();
+        if let Some((l_bp, r_bp)) = binding_power(kind, OperationKind::Binary) {
+            if l_bp < min_bp {
+                break;
+            }
+            lexer.next_token();
 
-        lhs = if op == OperationToken::QuestionMark {
-            println!("Ternary");
-            let mhs = expr(lexer, 0);
-            assert_eq!(lexer.next_token(), Token::new(TokenKind::Colon, ":"));
-            let rhs = expr(lexer, 0);
-            Expr::Op(op, OperationKind::Ternary, vec![lhs, mhs, rhs])
-        } else {
-            let rhs = expr(lexer, r_bp);
-            Expr::Op(op, OperationKind::Binary, vec![lhs, rhs])
+            lhs = if kind == TokenKind::QuestionMark {
+                println!("Ternary");
+                let mhs = expr(lexer, 0);
+                assert_eq!(lexer.next_token(), Token::new(TokenKind::Colon, ":"));
+                let rhs = expr(lexer, 0);
+                Expr::Op(kind, OperationKind::Ternary, vec![lhs, mhs, rhs])
+            } else {
+                let rhs = expr(lexer, r_bp);
+                Expr::Op(kind, OperationKind::Binary, vec![lhs, rhs])
+            };
+
+            continue;
         }
+
+        break;
     }
 
     lhs
@@ -340,9 +344,9 @@ fn expr(lexer: &mut Lexer, min_bp: u8) -> Expr {
 ///
 /// In some cases on of the binging powers does not make sense and will be set to 0. For
 /// `Unary` it will always be the first one and for `Postfix` it will always be the second one.
-fn binding_power(op: OperationToken, expected_kind: OperationKind) -> Option<(u8, u8)> {
+fn binding_power(op: TokenKind, expected_kind: OperationKind) -> Option<(u8, u8)> {
     use OperationKind as K;
-    use OperationToken as T;
+    use TokenKind as T;
 
     let is_binary = matches!(expected_kind, K::Binary);
     let is_unary = matches!(expected_kind, K::Unary);
@@ -384,8 +388,8 @@ fn test() {
     assert_eq!(s.to_string(), "1");
 
     let s = expr(&mut Lexer::new("x[0][1]"), 0);
-    assert_eq!(s.to_string(), "{[ ({[ x 0}) 1}");
+    assert_eq!(s.to_string(), "(x[0])[1]");
 
     let s = expr(&mut Lexer::new("a ? b : c ? d : e"), 0);
-    assert_eq!(s.to_string(), "{[ ({[ x 0}) 1}");
+    assert_eq!(s.to_string(), "a ? b : (c ? d : e)");
 }
