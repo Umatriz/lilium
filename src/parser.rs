@@ -6,21 +6,31 @@ pub enum TokenKind {
     Minus,
     Star,
     Slash,
-    // Operation(Operation),
     Equal,
     ExplanationMark,
     QuestionMark,
     Colon,
+    Comma,
 
     Number,
     Ident,
-    // Atom(Atom),
+    Literal,
+
+    /// |->
+    LambdaStart,
+    /// ->
+    ArrawRight,
+    /// =>
+    ArrawRightBold,
+
     LeftParen,
     RightParen,
     LeftBracket,
     RightBracket,
     LeftBrace,
     RightBrace,
+
+    NewLine,
 
     Eof,
 }
@@ -64,6 +74,12 @@ impl Lexer {
         while let Some(c) = chars.next() {
             match c {
                 ' ' => {}
+                '\t' => {}
+                '\r' if chars.peek().copied() == Some('\n') => {
+                    chars.next();
+                    tokens.push(Token::new(TokenKind::NewLine, "NEW_LINE"));
+                }
+                '\n' | '\r' => tokens.push(Token::new(TokenKind::NewLine, "NEW_LINE")),
                 '(' => tokens.push(Token::new(TokenKind::LeftParen, c)),
                 ')' => tokens.push(Token::new(TokenKind::RightParen, c)),
                 '[' => tokens.push(Token::new(TokenKind::LeftBracket, c)),
@@ -71,13 +87,42 @@ impl Lexer {
                 '{' => tokens.push(Token::new(TokenKind::LeftBrace, c)),
                 '}' => tokens.push(Token::new(TokenKind::RightBrace, c)),
                 '+' => tokens.push(Token::new(TokenKind::Plus, c)),
+                '-' if chars.peek().copied() == Some('>') => {
+                    chars.next();
+                    tokens.push(Token::new(TokenKind::ArrawRight, "->"));
+                }
                 '-' => tokens.push(Token::new(TokenKind::Minus, c)),
                 '*' => tokens.push(Token::new(TokenKind::Star, c)),
+                '=' if chars.peek().copied() == Some('>') => {
+                    chars.next();
+                    tokens.push(Token::new(TokenKind::ArrawRightBold, "=>"));
+                }
                 '=' => tokens.push(Token::new(TokenKind::Equal, c)),
                 '!' => tokens.push(Token::new(TokenKind::ExplanationMark, c)),
                 '?' => tokens.push(Token::new(TokenKind::QuestionMark, c)),
                 ':' => tokens.push(Token::new(TokenKind::Colon, c)),
+                ',' => tokens.push(Token::new(TokenKind::Comma, c)),
+                // Parse |->
+                '|' => {
+                    if chars
+                        .next_if(|c| *c == '-')
+                        .and_then(|_| chars.next_if(|c| *c == '>'))
+                        .is_some()
+                    {
+                        tokens.push(Token::new(TokenKind::LambdaStart, "|->"));
+                    } else {
+                        panic!("Unexpected token");
+                    };
+                }
 
+                '\"' => {
+                    let mut content = String::new();
+                    while let Some(c) = chars.next_if(|c| *c != '\"') {
+                        content.push(c);
+                    }
+                    assert_eq!(chars.next(), Some('\"'));
+                    tokens.push(Token::new(TokenKind::Literal, content));
+                }
                 '/' if chars.peek().is_some_and(|c| *c == '/') => {
                     // Skip until the newline
                     while let Some(_c) = chars.next_if(|c| *c != '\n') {}
@@ -113,7 +158,7 @@ impl Lexer {
     }
 }
 
-const DISPLAY_DATA_PAD: usize = 10;
+const DISPLAY_DATA_PAD: usize = 20;
 impl Display for Lexer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for token in self.tokens.iter().rev() {
@@ -153,33 +198,6 @@ impl Item {
         Some(it)
     }
 }
-
-// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// enum OperationToken {
-//     Plus,
-//     Minus,
-//     Star,
-//     Slash,
-//     ExplanationMark,
-//     LeftBracket,
-//     QuestionMark,
-// }
-
-// impl OperationToken {
-//     fn from_kind(kind: TokenKind) -> Option<Self> {
-//         use TokenKind::*;
-//         let op = match kind {
-//             Plus => Self::Plus,
-//             Munis => Self::Minus,
-//             Star => Self::Star,
-//             Slash => Self::Slash,
-//             ExplanationMark => Self::ExplanationMark,
-//             LeftBracket => Self::LeftBracket,
-//             _ => return None,
-//         };
-//         Some(op)
-//     }
-// }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OperationKind {
