@@ -15,6 +15,10 @@ fn main() {
         let content = std::fs::read_to_string(file_path).unwrap();
         println!("File content is:\n{content}");
         let lexer = Lexer::new(&content);
+        // assert_eq!(
+        //     Lexer::parse_tokens(&content),
+        //     Lexer::parse_tokens2(&content)
+        // );
         println!("Parsed result is:\n{lexer}");
     }
 

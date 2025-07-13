@@ -183,10 +183,11 @@ impl Lexer {
 
         let mut i = source;
 
+        #[allow(clippy::never_loop)]
         while !i.is_empty() {
             // Tabs and whitespaces
-            t(&mut i, tag(" "), skip);
-            t(&mut i, tag("\t"), skip);
+            t(&mut i, take_while(|c| c == ' '), skip);
+            t(&mut i, take_while(|c| c == '\t'), skip);
 
             // Newlines
             t(&mut i, tag("\r\n"), |_| {
@@ -251,6 +252,8 @@ impl Lexer {
                     push_t(TokenKind::Ident, &s);
                 },
             );
+
+            break;
 
             // Comment
             t(
@@ -599,6 +602,15 @@ mod tests {
     fn take_while_test() {
         let out = take_while(|c| c.is_ascii_alphabetic())("abc123");
         assert_eq!(out, Some(("123", "abc")));
+
+        let ident = (
+            // TODO: SOMETHING'S WRONG WITH THESE AND HOW THEY COMBINE
+            take_while(|c| c.is_ascii_alphabetic()),
+            take_while(|c| c.is_ascii_alphanumeric()),
+        )
+            .process("def");
+
+        println!("{ident:?}");
     }
 
     #[test]
@@ -611,6 +623,15 @@ mod tests {
     fn parse_literal_test() {
         let out = (tag("\""), take_till(|c| c == '\"'), tag("\"")).process("\"literal\"");
         assert_eq!(out, Some(("", ("\"", "literal", "\"",))));
+    }
+
+    #[test]
+    fn parse_test() {
+        // let s = "def";
+        // let mut tokens = Lexer::parse_tokens2(s);
+        // tokens.reverse();
+        // let lexer = Lexer { tokens };
+        // println!("{lexer}");
     }
 
     #[test]
