@@ -1,8 +1,8 @@
 def main () -> () =>
     double = (x) |-> x * 2
-    a = 35
+    a = 30
     b = double 16
-    c = add(a, b)
-    print "{c}"
+    c = add a b
+    println f"{c}"
 
-def add (int, int) -> int [a, b] => a + b
+def add (int, int) -> int => [a, b] a + b

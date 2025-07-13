@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use clap::builder::IntoResettable;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
     Plus,
@@ -22,6 +24,9 @@ pub enum TokenKind {
     ArrawRight,
     /// =>
     ArrawRightBold,
+
+    // Keywords
+    Def,
 
     LeftParen,
     RightParen,
@@ -55,6 +60,95 @@ impl Token {
     }
 }
 
+/// Returns (rest, tag).
+// TODO: Use custom result.
+pub fn tag(tag: &str) -> impl Fn(&str) -> Option<(&str, &str)> {
+    // let tag = tag.clone();
+    move |input| {
+        let len = tag.len();
+        if input.starts_with(tag) {
+            take(len)(input)
+        } else {
+            None
+        }
+    }
+}
+
+/// ## Examples
+/// ```rust
+/// # use lilium::parser::take;
+/// let s = "Hello World!";
+/// let out = take(5)(s);
+/// assert_eq!(out, Some((" World!", "Hello")));
+/// ```
+// TODO: Use custom result.
+pub fn take(offset_bytes: usize) -> impl Fn(&str) -> Option<(&str, &str)> {
+    move |input| {
+        input
+            .split_at_checked(offset_bytes)
+            .map(|(tag, rest)| (rest, tag))
+    }
+}
+
+pub fn take_while<F>(condition: F) -> impl Fn(&str) -> Option<(&str, &str)>
+where
+    F: Fn(char) -> bool,
+{
+    move |input| {
+        input
+            .find(|c| !condition(c))
+            .and_then(|index| take(index)(input))
+    }
+}
+
+pub fn take_till<F>(condition: F) -> impl Fn(&str) -> Option<(&str, &str)>
+where
+    F: Fn(char) -> bool,
+{
+    move |input| input.find(&condition).and_then(|index| take(index)(input))
+}
+
+pub trait Combinator<Input> {
+    type Output;
+    /// Process input and return (rest, output).
+    fn process(self, input: Input) -> Option<(Input, Self::Output)>;
+}
+
+impl<I, O, F> Combinator<I> for F
+where
+    F: Fn(I) -> Option<(I, O)>,
+{
+    type Output = O;
+    fn process(self, input: I) -> Option<(I, O)> {
+        (self)(input)
+    }
+}
+
+macro_rules! impl_combinator {
+    (
+        $(($C:ident, $O:ident, $c:ident, $o:ident)),*
+    ) => {
+        impl<I, $($C, $O),*> Combinator<I> for ($($C,)*)
+        where
+            $(
+                $C: Fn(I) -> Option<(I, $O)>,
+            )*
+        {
+            type Output = ($($O,)*);
+            fn process(self, input: I) -> Option<(I, Self::Output)> {
+                let ($($c,)*) = self;
+                let i = input;
+
+                $(let (i, $o) = $c.process(i)?;)*
+
+                Some((i, ($($o,)*)))
+            }
+        }
+    };
+}
+
+variadics_please::all_tuples!(impl_combinator, 0, 16, C, O, c, o);
+
 pub struct Lexer {
     /// Tokens order is reversed so the `next` and `peek` methods work
     tokens: Vec<Token>,
@@ -65,6 +159,29 @@ impl Lexer {
         let mut tokens = Self::parse_tokens(source);
         tokens.reverse();
         Self { tokens }
+    }
+
+    fn parse_tokens2(source: &str) -> Vec<Token> {
+        let mut tokens = Vec::new();
+
+        let push_t = |kind, data: &str| {
+            tokens.push(Token::new(kind, data));
+        };
+
+        let mut inp = source;
+
+        while !inp.is_empty() {
+            if let Some((i, tag)) = tag(" ")(inp) {
+                inp = i;
+                continue;
+            }
+            if let Some((i, tag)) = tag("\t")(inp) {
+                inp = i;
+                continue;
+            }
+        }
+
+        tokens
     }
 
     fn parse_tokens(source: &str) -> Vec<Token> {
@@ -338,7 +455,6 @@ fn expr(lexer: &mut Lexer, min_bp: u8) -> Expr {
             lexer.next_token();
 
             lhs = if kind == TokenKind::QuestionMark {
-                println!("Ternary");
                 let mhs = expr(lexer, 0);
                 assert_eq!(lexer.next_token(), Token::new(TokenKind::Colon, ":"));
                 let rhs = expr(lexer, 0);
@@ -382,32 +498,70 @@ fn binding_power(op: TokenKind, expected_kind: OperationKind) -> Option<(u8, u8)
     Some(power)
 }
 
-#[test]
-fn test() {
-    let s = expr(&mut Lexer::new("1"), 0);
-    assert_eq!(s.to_string(), "1");
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let s = expr(&mut Lexer::new("187312"), 0);
-    assert_eq!(s.to_string(), "187312");
+    #[test]
+    fn tag_test() {
+        let out = tag("abc")("abc123");
+        assert_eq!(out, Some(("123", "abc")));
 
-    let s = expr(&mut Lexer::new("1 + 2 * 3"), 0);
-    assert_eq!(s.to_string(), "1 + (2 * 3)");
+        let out = tag("\r\n")("123\n\r");
+        assert!(out.is_none());
 
-    let s = expr(&mut Lexer::new("a + b * c * d + e"), 0);
-    assert_eq!(s.to_string(), "(a + ((b * c) * d)) + e");
+        let out = tag("\r\n")("\r\ndef x");
+        assert_eq!(out, Some(("def x", "\r\n")));
 
-    let s = expr(&mut Lexer::new("--1 * 2"), 0);
-    assert_eq!(s.to_string(), "(-(-1)) * 2");
+        let out = tag(" ")("     <- 5 whitespaces");
+        assert_eq!(out, Some(("    <- 5 whitespaces", " ")));
+    }
 
-    let s = expr(&mut Lexer::new("-9!"), 0);
-    assert_eq!(s.to_string(), "-(9!)");
+    #[test]
+    fn take_while_test() {
+        let out = take_while(|c| c.is_ascii_alphabetic())("abc123");
+        assert_eq!(out, Some(("123", "abc")));
+    }
 
-    let s = expr(&mut Lexer::new("((((1))))"), 0);
-    assert_eq!(s.to_string(), "1");
+    #[test]
+    fn take_till_test() {
+        let out = take_till(|c| c == '!')("123abc q! qwe");
+        assert_eq!(out, Some(("! qwe", "123abc q")));
+    }
 
-    let s = expr(&mut Lexer::new("x[0][1]"), 0);
-    assert_eq!(s.to_string(), "(x[0])[1]");
+    #[test]
+    fn parse_literal_test() {
+        let out = (tag("\""), take_till(|c| c == '\"'), tag("\"")).process("\"literal\"");
+        assert_eq!(out, Some(("", ("\"", "literal", "\"",))));
+    }
 
-    let s = expr(&mut Lexer::new("a ? b : c ? d : e"), 0);
-    assert_eq!(s.to_string(), "a ? b : (c ? d : e)");
+    #[test]
+    fn expr_test() {
+        let s = expr(&mut Lexer::new("1"), 0);
+        assert_eq!(s.to_string(), "1");
+
+        let s = expr(&mut Lexer::new("187312"), 0);
+        assert_eq!(s.to_string(), "187312");
+
+        let s = expr(&mut Lexer::new("1 + 2 * 3"), 0);
+        assert_eq!(s.to_string(), "1 + (2 * 3)");
+
+        let s = expr(&mut Lexer::new("a + b * c * d + e"), 0);
+        assert_eq!(s.to_string(), "(a + ((b * c) * d)) + e");
+
+        let s = expr(&mut Lexer::new("--1 * 2"), 0);
+        assert_eq!(s.to_string(), "(-(-1)) * 2");
+
+        let s = expr(&mut Lexer::new("-9!"), 0);
+        assert_eq!(s.to_string(), "-(9!)");
+
+        let s = expr(&mut Lexer::new("((((1))))"), 0);
+        assert_eq!(s.to_string(), "1");
+
+        let s = expr(&mut Lexer::new("x[0][1]"), 0);
+        assert_eq!(s.to_string(), "(x[0])[1]");
+
+        let s = expr(&mut Lexer::new("a ? b : c ? d : e"), 0);
+        assert_eq!(s.to_string(), "a ? b : (c ? d : e)");
+    }
 }
