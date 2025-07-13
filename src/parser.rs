@@ -162,21 +162,79 @@ impl Lexer {
     }
 
     fn parse_tokens2(source: &str) -> Vec<Token> {
+        fn t<I, O, F>(inp: &mut I, combinator_out: Option<(I, O)>, fun: Fn(O))
+        where
+            F: Fn(O),
+        {
+            if let Some((i, out)) = combinator_out {
+                *inp = i;
+                fun(out)
+            }
+        }
+
+        fn skip<O>(_: O) {}
+
         let mut tokens = Vec::new();
 
-        let push_t = |kind, data: &str| {
+        let mut push_t = |kind, data: &str| {
             tokens.push(Token::new(kind, data));
         };
 
         let mut inp = source;
 
         while !inp.is_empty() {
-            if let Some((i, tag)) = tag(" ")(inp) {
+            // Tabs and whitespaces
+            t(&mut inp, tag(" ")(inp), skip);
+            t(&mut inp, tag("\t")(inp), skip);
+
+            // Newlines
+            if let Some((i, tag)) = tag("\r\n")(inp) {
                 inp = i;
+                push_t(TokenKind::NewLine, tag);
+            }
+            if let Some((i, tag)) = tag("\n")(inp) {
+                inp = i;
+                push_t(TokenKind::NewLine, "NEW_LINE");
+            }
+            if let Some((i, tag)) = tag("\r")(inp) {
+                inp = i;
+                push_t(TokenKind::NewLine, "NEW_LINE");
+            }
+
+            // Operations
+            if let Some((i, tag)) = tag("(")(inp) {
+                inp = i;
+                push_t(TokenKind::LeftParen, tag);
                 continue;
             }
-            if let Some((i, tag)) = tag("\t")(inp) {
+            if let Some((i, tag)) = tag(")")(inp) {
                 inp = i;
+                push_t(TokenKind::RightParen, tag);
+                continue;
+            }
+            if let Some((i, tag)) = tag("[")(inp) {
+                inp = i;
+                push_t(TokenKind::LeftBracket, tag);
+                continue;
+            }
+            if let Some((i, tag)) = tag("]")(inp) {
+                inp = i;
+                push_t(TokenKind::RightBracket, tag);
+                continue;
+            }
+            if let Some((i, tag)) = tag("{")(inp) {
+                inp = i;
+                push_t(TokenKind::LeftBrace, tag);
+                continue;
+            }
+            if let Some((i, tag)) = tag("}")(inp) {
+                inp = i;
+                push_t(TokenKind::RightBrace, tag);
+                continue;
+            }
+            if let Some((i, tag)) = tag("+")(inp) {
+                inp = i;
+                push_t(TokenKind::Plus, tag);
                 continue;
             }
         }
