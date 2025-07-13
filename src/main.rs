@@ -1,13 +1,21 @@
+use std::path::PathBuf;
+
 use clap::{ArgAction, Command, arg, value_parser};
+use lilium::parser::Lexer;
 
 fn main() {
     let matches = Command::new("lilium")
-        .arg(arg!(-e --exec <CODE> "Execute the code").value_parser(value_parser!(String)))
+        .subcommand(
+            Command::new("lex").arg(arg!("file": <FILE>).value_parser(value_parser!(PathBuf))),
+        )
         .get_matches();
 
-    if let Some(code) = matches.get_one::<String>("exec") {
-        let lexer = lilium::parser::Lexer::new(code);
-        println!("{lexer}");
+    if let Some(sub) = matches.subcommand_matches("lex") {
+        let file_path = sub.get_one::<PathBuf>("file").unwrap();
+        let content = std::fs::read_to_string(file_path).unwrap();
+        println!("File content is:\n{content}");
+        let lexer = Lexer::new(&content);
+        println!("Parsed result is:\n{lexer}");
     }
 
     // let expr = args.nth(1).expect("No expression to parse");
