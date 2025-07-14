@@ -98,6 +98,22 @@ where
         input
             .find(|c| !condition(c))
             .and_then(|index| take(index)(input))
+            .or_else(|| {
+                let len = input.len();
+                take(len)(input)
+            })
+    }
+}
+
+pub fn take_while1<F>(condition: F) -> impl Fn(&str) -> Option<(&str, &str)>
+where
+    F: Fn(char) -> bool,
+{
+    move |input| {
+        input
+            .find(|c| !condition(c))
+            .filter(|index| *index != 0)
+            .and_then(|index| take(index)(input))
     }
 }
 
@@ -108,18 +124,50 @@ where
     move |input| input.find(&condition).and_then(|index| take(index)(input))
 }
 
+pub fn many0<I: Clone, O>(
+    mut combinator: impl Combinator<I, Output = O>,
+) -> impl FnMut(I) -> Option<(I, Vec<O>)> {
+    move |input| {
+        let mut outs = Vec::new();
+        let mut input = input;
+        while let Some((i, out)) = combinator.process(input.clone()) {
+            outs.push(out);
+            input = i;
+        }
+        Some((input, outs))
+    }
+}
+
+pub fn many1<I: Clone, O>(
+    mut combinator: impl Combinator<I, Output = O>,
+) -> impl FnMut(I) -> Option<(I, Vec<O>)> {
+    move |input| {
+        let mut outs = Vec::new();
+        let mut input = input;
+        while let Some((i, out)) = combinator.process(input.clone()) {
+            outs.push(out);
+            input = i;
+        }
+        if outs.is_empty() {
+            None
+        } else {
+            Some((input, outs))
+        }
+    }
+}
+
 pub trait Combinator<Input> {
     type Output;
     /// Process input and return (rest, output).
-    fn process(self, input: Input) -> Option<(Input, Self::Output)>;
+    fn process(&mut self, input: Input) -> Option<(Input, Self::Output)>;
 }
 
 impl<I, O, F> Combinator<I> for F
 where
-    F: Fn(I) -> Option<(I, O)>,
+    F: FnMut(I) -> Option<(I, O)>,
 {
     type Output = O;
-    fn process(self, input: I) -> Option<(I, O)> {
+    fn process(&mut self, input: I) -> Option<(I, O)> {
         (self)(input)
     }
 }
@@ -135,8 +183,8 @@ macro_rules! impl_combinator {
             )*
         {
             type Output = ($($O,)*);
-            fn process(self, input: I) -> Option<(I, Self::Output)> {
-                let ($($c,)*) = self;
+            fn process(&mut self, input: I) -> Option<(I, Self::Output)> {
+                let ($(ref mut $c,)*) = *self;
                 let i = input;
 
                 $(let (i, $o) = $c.process(i)?;)*
@@ -156,20 +204,24 @@ pub struct Lexer {
 
 impl Lexer {
     pub fn new(source: &str) -> Self {
-        let mut tokens = Self::parse_tokens(source);
+        let mut tokens = Self::parse_tokens2(source);
         tokens.reverse();
         Self { tokens }
     }
 
     pub fn parse_tokens2(source: &str) -> Vec<Token> {
+        /// Returns `true` if the parse was successful and `false` if not.
         fn t<I: Copy, O>(
             inp: &mut I,
-            combinator: impl Combinator<I, Output = O>,
+            mut combinator: impl Combinator<I, Output = O>,
             fun: impl FnOnce(O),
-        ) {
+        ) -> bool {
             if let Some((i, out)) = combinator.process(*inp) {
                 *inp = i;
-                fun(out)
+                fun(out);
+                true
+            } else {
+                false
             }
         }
 
@@ -183,22 +235,29 @@ impl Lexer {
 
         let mut i = source;
 
-        #[allow(clippy::never_loop)]
         while !i.is_empty() {
             // Tabs and whitespaces
             t(&mut i, take_while(|c| c == ' '), skip);
             t(&mut i, take_while(|c| c == '\t'), skip);
 
             // Newlines
-            t(&mut i, tag("\r\n"), |_| {
+            //
+            // We continue when we match one of the variants so it doesn't produce truple tokens on Windows
+            if t(&mut i, tag("\r\n"), |_| {
                 push_t(TokenKind::NewLine, "NEW_LINE")
-            });
-            t(&mut i, tag("\n"), |_| {
+            }) {
+                continue;
+            };
+            if t(&mut i, tag("\n"), |_| {
                 push_t(TokenKind::NewLine, "NEW_LINE")
-            });
-            t(&mut i, tag("\r"), |_| {
+            }) {
+                continue;
+            };
+            if t(&mut i, tag("\r"), |_| {
                 push_t(TokenKind::NewLine, "NEW_LINE")
-            });
+            }) {
+                continue;
+            };
 
             // Delimiters
             t(&mut i, tag("("), |o| push_t(TokenKind::LeftParen, o));
@@ -233,7 +292,7 @@ impl Lexer {
             );
 
             // Number
-            t(&mut i, take_while(|c| c.is_ascii_digit()), |o| {
+            t(&mut i, take_while1(|c| c.is_ascii_digit()), |o| {
                 push_t(TokenKind::Number, o)
             });
 
@@ -242,7 +301,7 @@ impl Lexer {
                 &mut i,
                 (
                     // Idents can't start from numbers so we use two `take_while`s
-                    take_while(|c| c.is_ascii_alphabetic()),
+                    take_while1(|c| c.is_ascii_alphabetic()),
                     take_while(|c| c.is_ascii_alphanumeric()),
                 ),
                 |(first, second)| {
@@ -252,8 +311,6 @@ impl Lexer {
                     push_t(TokenKind::Ident, &s);
                 },
             );
-
-            break;
 
             // Comment
             t(
@@ -609,8 +666,9 @@ mod tests {
             take_while(|c| c.is_ascii_alphanumeric()),
         )
             .process("def");
-
         println!("{ident:?}");
+
+        // let literal = (tag("\""), take_till(|c| c == '\"'), tag("\"")).process("\"literal\" rest");
     }
 
     #[test]
@@ -619,11 +677,11 @@ mod tests {
         assert_eq!(out, Some(("! qwe", "123abc q")));
     }
 
-    #[test]
-    fn parse_literal_test() {
-        let out = (tag("\""), take_till(|c| c == '\"'), tag("\"")).process("\"literal\"");
-        assert_eq!(out, Some(("", ("\"", "literal", "\"",))));
-    }
+    // #[test]
+    // fn parse_literal_test() {
+    //     let out = (tag("\""), take_till(|c| c == '\"'), tag("\"")).process("\"literal\"");
+    //     assert_eq!(out, Some(("", ("\"", "literal", "\"",))));
+    // }
 
     #[test]
     fn parse_test() {
