@@ -15,16 +15,6 @@ fn main() {
         let content = std::fs::read_to_string(file_path).unwrap();
         println!("File content is:\n{content}");
         let lexer = Lexer::new(&content);
-
-        let t1 = Lexer::parse_tokens(&content);
-        let t2 = Lexer::parse_tokens2(&content);
-
-        // assert_eq!(t1.len(), t2.len());
-
-        for i in 0..(t1.len().max(t2.len())) {
-            assert_eq!(t1.get(i), t2.get(i));
-        }
-
         println!("Parsed result is:\n{lexer}");
     }
 

@@ -204,12 +204,12 @@ pub struct Lexer {
 
 impl Lexer {
     pub fn new(source: &str) -> Self {
-        let mut tokens = Self::parse_tokens2(source);
+        let mut tokens = Self::parse_tokens(source);
         tokens.reverse();
         Self { tokens }
     }
 
-    pub fn parse_tokens2(source: &str) -> Vec<Token> {
+    pub fn parse_tokens(source: &str) -> Vec<Token> {
         /// Returns `true` if the parse was successful and `false` if not.
         fn t<I: Copy, O>(
             inp: &mut I,
@@ -318,87 +318,6 @@ impl Lexer {
                 (tag("//"), take_till(|c| c == '\n' || c == '\r')),
                 skip,
             );
-        }
-
-        tokens
-    }
-
-    pub fn parse_tokens(source: &str) -> Vec<Token> {
-        let mut tokens = Vec::new();
-
-        let mut chars = source.chars().peekable();
-        while let Some(c) = chars.next() {
-            match c {
-                ' ' => {}
-                '\t' => {}
-                '\r' if chars.peek().copied() == Some('\n') => {
-                    chars.next();
-                    tokens.push(Token::new(TokenKind::NewLine, "NEW_LINE"));
-                }
-                '\n' | '\r' => tokens.push(Token::new(TokenKind::NewLine, "NEW_LINE")),
-                '(' => tokens.push(Token::new(TokenKind::LeftParen, c)),
-                ')' => tokens.push(Token::new(TokenKind::RightParen, c)),
-                '[' => tokens.push(Token::new(TokenKind::LeftBracket, c)),
-                ']' => tokens.push(Token::new(TokenKind::RightBracket, c)),
-                '{' => tokens.push(Token::new(TokenKind::LeftBrace, c)),
-                '}' => tokens.push(Token::new(TokenKind::RightBrace, c)),
-                '+' => tokens.push(Token::new(TokenKind::Plus, c)),
-                '-' if chars.peek().copied() == Some('>') => {
-                    chars.next();
-                    tokens.push(Token::new(TokenKind::ArrawRight, "->"));
-                }
-                '-' => tokens.push(Token::new(TokenKind::Minus, c)),
-                '*' => tokens.push(Token::new(TokenKind::Star, c)),
-                '=' if chars.peek().copied() == Some('>') => {
-                    chars.next();
-                    tokens.push(Token::new(TokenKind::ArrawRightBold, "=>"));
-                }
-                '=' => tokens.push(Token::new(TokenKind::Equal, c)),
-                '!' => tokens.push(Token::new(TokenKind::ExplanationMark, c)),
-                '?' => tokens.push(Token::new(TokenKind::QuestionMark, c)),
-                ':' => tokens.push(Token::new(TokenKind::Colon, c)),
-                ',' => tokens.push(Token::new(TokenKind::Comma, c)),
-                // Parse |->
-                '|' => {
-                    if chars
-                        .next_if(|c| *c == '-')
-                        .and_then(|_| chars.next_if(|c| *c == '>'))
-                        .is_some()
-                    {
-                        tokens.push(Token::new(TokenKind::LambdaStart, "|->"));
-                    } else {
-                        panic!("Unexpected token");
-                    };
-                }
-                '\"' => {
-                    let mut content = String::new();
-                    while let Some(c) = chars.next_if(|c| *c != '\"') {
-                        content.push(c);
-                    }
-                    assert_eq!(chars.next(), Some('\"'));
-                    tokens.push(Token::new(TokenKind::Literal, content));
-                }
-                '/' if chars.peek().is_some_and(|c| *c == '/') => {
-                    // Skip until the newline
-                    while let Some(_c) = chars.next_if(|c| *c != '\n') {}
-                }
-                '/' => tokens.push(Token::new(TokenKind::Slash, c)),
-                c if c.is_ascii_digit() => {
-                    let mut content = String::from(c);
-                    while let Some(c) = chars.next_if(|c| c.is_ascii_digit()) {
-                        content.push(c);
-                    }
-                    tokens.push(Token::new(TokenKind::Number, content));
-                }
-                c if c.is_ascii_alphabetic() => {
-                    let mut content = String::from(c);
-                    while let Some(c) = chars.next_if(|c| c.is_ascii_alphanumeric()) {
-                        content.push(c);
-                    }
-                    tokens.push(Token::new(TokenKind::Ident, content));
-                }
-                _ => unimplemented!("Unsupported token: {c}"),
-            }
         }
 
         tokens
