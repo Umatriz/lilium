@@ -42,8 +42,8 @@ pub enum TokenKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
-    kind: TokenKind,
-    data: String,
+    pub kind: TokenKind,
+    pub data: String,
 }
 
 impl Token {
@@ -76,7 +76,7 @@ pub fn tag(tag: &str) -> impl Fn(&str) -> Option<(&str, &str)> {
 
 /// ## Examples
 /// ```rust
-/// # use lilium::parser::take;
+/// # use lilium::lexer::take;
 /// let s = "Hello World!";
 /// let out = take(5)(s);
 /// assert_eq!(out, Some((" World!", "Hello")));
@@ -403,35 +403,5 @@ mod tests {
         // tokens.reverse();
         // let lexer = Lexer { tokens };
         // println!("{lexer}");
-    }
-
-    #[test]
-    fn expr_test() {
-        let s = expr(&mut Lexer::new("1"), 0);
-        assert_eq!(s.to_string(), "1");
-
-        let s = expr(&mut Lexer::new("187312"), 0);
-        assert_eq!(s.to_string(), "187312");
-
-        let s = expr(&mut Lexer::new("1 + 2 * 3"), 0);
-        assert_eq!(s.to_string(), "1 + (2 * 3)");
-
-        let s = expr(&mut Lexer::new("a + b * c * d + e"), 0);
-        assert_eq!(s.to_string(), "(a + ((b * c) * d)) + e");
-
-        let s = expr(&mut Lexer::new("--1 * 2"), 0);
-        assert_eq!(s.to_string(), "(-(-1)) * 2");
-
-        let s = expr(&mut Lexer::new("-9!"), 0);
-        assert_eq!(s.to_string(), "-(9!)");
-
-        let s = expr(&mut Lexer::new("((((1))))"), 0);
-        assert_eq!(s.to_string(), "1");
-
-        let s = expr(&mut Lexer::new("x[0][1]"), 0);
-        assert_eq!(s.to_string(), "(x[0])[1]");
-
-        let s = expr(&mut Lexer::new("a ? b : c ? d : e"), 0);
-        assert_eq!(s.to_string(), "a ? b : (c ? d : e)");
     }
 }
