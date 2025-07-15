@@ -21,7 +21,7 @@ pub enum TokenKind {
     /// |->
     LambdaStart,
     /// ->
-    ArrawRight,
+    ArrowRight,
     /// =>
     ArrawRightBold,
 
@@ -268,7 +268,7 @@ impl Lexer {
             t(&mut i, tag("}"), |o| push_t(TokenKind::RightBrace, o));
 
             // Arrows
-            t(&mut i, tag("->"), |o| push_t(TokenKind::ArrawRight, o));
+            t(&mut i, tag("->"), |o| push_t(TokenKind::ArrowRight, o));
             t(&mut i, tag("|->"), |o| push_t(TokenKind::LambdaStart, o));
             t(&mut i, tag("=>"), |o| push_t(TokenKind::ArrawRightBold, o));
 
@@ -283,6 +283,9 @@ impl Lexer {
             t(&mut i, tag("?"), |o| push_t(TokenKind::QuestionMark, o));
             t(&mut i, tag(":"), |o| push_t(TokenKind::Colon, o));
             t(&mut i, tag(","), |o| push_t(TokenKind::Comma, o));
+
+            // Keywords
+            t(&mut i, tag("def"), |o| push_t(TokenKind::Def, o));
 
             // Literal
             t(
@@ -323,8 +326,8 @@ impl Lexer {
         tokens
     }
 
-    pub fn next_token(&mut self) -> Token {
-        self.tokens.pop().unwrap_or(Token::EOF)
+    pub fn next_token(&mut self) -> Option<Token> {
+        self.tokens.pop()
     }
 
     pub fn peek_token(&mut self) -> Option<&Token> {
