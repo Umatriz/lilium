@@ -1,10 +1,8 @@
-def main: () -> ()
-as
-    double = (x) |-> x * 2
-    a = 30
-    b = double 16
-    c = add a b
-    println f"{c}"
-
 def add: (int, int) -> int
 as (a, b) a + b
+
+double = (x) |-> x * 2
+a = 30
+b = double 16
+c = add a b
+println f"{c}"
