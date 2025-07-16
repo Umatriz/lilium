@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, ops::Range};
 
 use clap::builder::IntoResettable;
 
@@ -27,6 +27,7 @@ pub enum TokenKind {
 
     // Keywords
     Def,
+    As,
 
     LeftParen,
     RightParen,
@@ -204,8 +205,8 @@ pub struct Lexer {
 
 impl Lexer {
     pub fn new(source: &str) -> Self {
-        let mut tokens = Self::parse_tokens(source);
-        tokens.reverse();
+        let tokens = Self::parse_tokens(source);
+        // tokens.reverse();
         Self { tokens }
     }
 
@@ -233,75 +234,69 @@ impl Lexer {
             tokens.push(Token::new(kind, data));
         };
 
-        let mut i = source;
+        let mut inp = source;
+        let i = &mut inp;
 
         while !i.is_empty() {
             // Tabs and whitespaces
-            t(&mut i, take_while(|c| c == ' '), skip);
-            t(&mut i, take_while(|c| c == '\t'), skip);
+            t(i, take_while(|c| c == ' '), skip);
+            t(i, take_while(|c| c == '\t'), skip);
 
             // Newlines
-            //
-            // We continue when we match one of the variants so it doesn't produce truple tokens on Windows
-            if t(&mut i, tag("\r\n"), |_| {
+            t(i, many1(tag("\r\n")), |_| {
                 push_t(TokenKind::NewLine, "NEW_LINE")
-            }) {
-                continue;
-            };
-            if t(&mut i, tag("\n"), |_| {
+            });
+            t(i, many1(tag("\n")), |_| {
                 push_t(TokenKind::NewLine, "NEW_LINE")
-            }) {
-                continue;
-            };
-            if t(&mut i, tag("\r"), |_| {
+            });
+            t(i, many1(tag("\r")), |_| {
                 push_t(TokenKind::NewLine, "NEW_LINE")
-            }) {
-                continue;
-            };
+            });
 
             // Delimiters
-            t(&mut i, tag("("), |o| push_t(TokenKind::LeftParen, o));
-            t(&mut i, tag(")"), |o| push_t(TokenKind::RightParen, o));
-            t(&mut i, tag("["), |o| push_t(TokenKind::LeftBracket, o));
-            t(&mut i, tag("]"), |o| push_t(TokenKind::RightBracket, o));
-            t(&mut i, tag("{"), |o| push_t(TokenKind::LeftBrace, o));
-            t(&mut i, tag("}"), |o| push_t(TokenKind::RightBrace, o));
+            t(i, tag("("), |o| push_t(TokenKind::LeftParen, o));
+            t(i, tag(")"), |o| push_t(TokenKind::RightParen, o));
+            t(i, tag("["), |o| push_t(TokenKind::LeftBracket, o));
+            t(i, tag("]"), |o| push_t(TokenKind::RightBracket, o));
+            t(i, tag("{"), |o| push_t(TokenKind::LeftBrace, o));
+            t(i, tag("}"), |o| push_t(TokenKind::RightBrace, o));
 
             // Arrows
-            t(&mut i, tag("->"), |o| push_t(TokenKind::ArrowRight, o));
-            t(&mut i, tag("|->"), |o| push_t(TokenKind::LambdaStart, o));
-            t(&mut i, tag("=>"), |o| push_t(TokenKind::ArrawRightBold, o));
+            t(i, tag("->"), |o| push_t(TokenKind::ArrowRight, o));
+            t(i, tag("|->"), |o| push_t(TokenKind::LambdaStart, o));
+            t(i, tag("=>"), |o| push_t(TokenKind::ArrawRightBold, o));
 
             // Operations
-            t(&mut i, tag("+"), |o| push_t(TokenKind::Plus, o));
-            t(&mut i, tag("-"), |o| push_t(TokenKind::Minus, o));
-            t(&mut i, tag("*"), |o| push_t(TokenKind::Star, o));
-            t(&mut i, tag("/"), |o| push_t(TokenKind::Slash, o));
-            t(&mut i, tag("="), |o| push_t(TokenKind::Equal, o));
+            t(i, tag("+"), |o| push_t(TokenKind::Plus, o));
+            t(i, tag("-"), |o| push_t(TokenKind::Minus, o));
+            t(i, tag("*"), |o| push_t(TokenKind::Star, o));
+            t(i, tag("/"), |o| push_t(TokenKind::Slash, o));
+            t(i, tag("="), |o| push_t(TokenKind::Equal, o));
 
-            t(&mut i, tag("!"), |o| push_t(TokenKind::ExplanationMark, o));
-            t(&mut i, tag("?"), |o| push_t(TokenKind::QuestionMark, o));
-            t(&mut i, tag(":"), |o| push_t(TokenKind::Colon, o));
-            t(&mut i, tag(","), |o| push_t(TokenKind::Comma, o));
+            t(i, tag("!"), |o| push_t(TokenKind::ExplanationMark, o));
+            t(i, tag("?"), |o| push_t(TokenKind::QuestionMark, o));
+            t(i, tag(":"), |o| push_t(TokenKind::Colon, o));
+            t(i, tag(","), |o| push_t(TokenKind::Comma, o));
 
             // Keywords
-            t(&mut i, tag("def"), |o| push_t(TokenKind::Def, o));
+            t(i, tag("def"), |o| push_t(TokenKind::Def, o));
+            t(i, tag("as"), |o| push_t(TokenKind::As, o));
 
             // Literal
             t(
-                &mut i,
+                i,
                 (tag("\""), take_till(|c| c == '\"'), tag("\"")),
                 |(_, literal, _)| push_t(TokenKind::Literal, literal),
             );
 
             // Number
-            t(&mut i, take_while1(|c| c.is_ascii_digit()), |o| {
+            t(i, take_while1(|c| c.is_ascii_digit()), |o| {
                 push_t(TokenKind::Number, o)
             });
 
             // Identifier
             t(
-                &mut i,
+                i,
                 (
                     // Idents can't start from numbers so we use two `take_while`s
                     take_while1(|c| c.is_ascii_alphabetic()),
@@ -316,29 +311,24 @@ impl Lexer {
             );
 
             // Comment
-            t(
-                &mut i,
-                (tag("//"), take_till(|c| c == '\n' || c == '\r')),
-                skip,
-            );
+            t(i, (tag("//"), take_till(|c| c == '\n' || c == '\r')), skip);
         }
 
         tokens
     }
 
-    pub fn next_token(&mut self) -> Option<Token> {
-        self.tokens.pop()
-    }
-
-    pub fn peek_token(&mut self) -> Option<&Token> {
-        self.tokens.last()
+    pub fn tokens(&self) -> Tokens<'_> {
+        Tokens {
+            buffer: &self.tokens,
+            cursor: 0,
+        }
     }
 }
 
 const DISPLAY_DATA_PAD: usize = 20;
 impl Display for Lexer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for token in self.tokens.iter().rev() {
+        for token in &self.tokens {
             write!(f, "{:?}", token.kind)?;
             // TODO: Use custom write impl that counts bytes
             let length = format!("{:?}", token.kind).len();
@@ -349,6 +339,36 @@ impl Display for Lexer {
         }
 
         Ok(())
+    }
+}
+
+pub struct Tokens<'a> {
+    buffer: &'a [Token],
+    cursor: usize,
+}
+
+impl<'a> Tokens<'a> {
+    /// Take an idependent iterator over a region bounded by `range`.
+    pub fn region(&self, range: Range<usize>) -> Tokens<'a> {
+        let buffer = &self.buffer[range];
+        Tokens { buffer, cursor: 0 }
+    }
+
+    // TODO: Should be wrapped around `Peekable<...>` instead?
+    pub fn peek(&self) -> Option<&Token> {
+        self.buffer.get(self.cursor)
+    }
+}
+
+impl<'a> Iterator for Tokens<'a> {
+    type Item = &'a Token;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let idx = self.cursor;
+        if self.cursor != self.buffer.len() {
+            self.cursor += 1;
+        }
+        self.buffer.get(idx)
     }
 }
 

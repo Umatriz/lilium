@@ -1,6 +1,6 @@
 use std::{fmt::Display, num::ParseIntError};
 
-use crate::lexer::{Lexer, Token, TokenKind};
+use crate::lexer::{Token, TokenKind, Tokens};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -19,7 +19,7 @@ pub enum Error {
 }
 
 #[derive(Debug)]
-enum ExpectedTokens {
+pub enum ExpectedTokens {
     FullToken(Token),
     Single(TokenKind),
     OneOf(&'static [TokenKind]),
@@ -35,16 +35,16 @@ impl Display for ExpectedTokens {
                 write!(f, "{:?}", token_kind)?;
             }
             ExpectedTokens::OneOf(token_kinds) => {
-                write!(f, "one of [");
+                write!(f, "one of [")?;
                 let last_i = token_kinds.len() - 1;
                 for (i, k) in token_kinds.iter().enumerate() {
-                    write!(f, "{:?}", k);
+                    write!(f, "{:?}", k)?;
                     if i == last_i {
                         break;
                     }
-                    write!(f, ", ");
+                    write!(f, ", ")?;
                 }
-                write!(f, "]");
+                write!(f, "]")?;
             }
         };
         Ok(())
@@ -54,7 +54,7 @@ impl Display for ExpectedTokens {
 pub type AResult<T, E = Error> = core::result::Result<T, E>;
 
 pub trait Parse {
-    fn parse(lexer: &mut Lexer) -> AResult<Self>
+    fn parse(tokens: &mut Tokens) -> AResult<Self>
     where
         Self: Sized;
 }
@@ -130,11 +130,11 @@ pub struct LiteralExp {
 }
 
 impl Parse for LiteralExp {
-    fn parse(lexer: &mut Lexer) -> AResult<Self>
+    fn parse(tokens: &mut Tokens) -> AResult<Self>
     where
         Self: Sized,
     {
-        match lexer.next_token() {
+        match tokens.next().cloned() {
             Some(Token {
                 kind: TokenKind::Literal,
                 data,
@@ -155,11 +155,11 @@ pub struct IntegerExpr {
 }
 
 impl Parse for IntegerExpr {
-    fn parse(lexer: &mut Lexer) -> AResult<Self>
+    fn parse(tokens: &mut Tokens) -> AResult<Self>
     where
         Self: Sized,
     {
-        match lexer.next_token() {
+        match tokens.next().cloned() {
             Some(Token {
                 kind: TokenKind::Number,
                 data,
@@ -182,11 +182,11 @@ pub struct IdentExpr {
 }
 
 impl Parse for IdentExpr {
-    fn parse(lexer: &mut Lexer) -> AResult<Self>
+    fn parse(tokens: &mut Tokens) -> AResult<Self>
     where
         Self: Sized,
     {
-        match lexer.next_token() {
+        match tokens.next().cloned() {
             Some(Token {
                 kind: TokenKind::Ident,
                 data,
@@ -201,22 +201,29 @@ impl Parse for IdentExpr {
     }
 }
 
-pub fn expr(lexer: &mut Lexer, min_bp: u8) -> AResult<Expr> {
-    let Some(Token { kind, data }) = lexer.next_token() else {
+pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
+    let Some(Token { kind, data }) = tokens.next() else {
         return Err(Error::Eof);
     };
 
     use TokenKind::*;
     let mut lhs = match kind {
         Number => Expr::Integer(IntegerExpr { int: data.parse()? }),
-        Ident => Expr::Ident(IdentExpr { ident: data }),
-        Literal => Expr::Literal(LiteralExp { literal: data }),
+        Ident => Expr::Ident(IdentExpr {
+            ident: data.clone(),
+        }),
+        Literal => Expr::Literal(LiteralExp {
+            literal: data.clone(),
+        }),
         LeftParen => {
             todo!()
         }
         _ => {
             return Err(Error::UnexpectedToken {
-                found: Token { kind, data },
+                found: Token {
+                    kind: *kind,
+                    data: data.clone(),
+                },
                 expected: ExpectedTokens::OneOf(&[Number, Ident, Literal]),
                 expected_msg: Some(" or a lambda expression"),
             });
@@ -224,7 +231,7 @@ pub fn expr(lexer: &mut Lexer, min_bp: u8) -> AResult<Expr> {
     };
 
     loop {
-        let Some(Token { kind, data }) = lexer.peek_token().cloned() else {
+        let Some(Token { kind, data }) = tokens.peek().cloned() else {
             break;
         };
         if kind == Eof {
@@ -236,8 +243,8 @@ pub fn expr(lexer: &mut Lexer, min_bp: u8) -> AResult<Expr> {
                 break;
             }
 
-            lexer.next_token();
-            let rhs = expr(lexer, r_bp)?;
+            tokens.next();
+            let rhs = expr(tokens, r_bp)?;
             let ex = Expr::Binary(BinaryExpr {
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
@@ -304,35 +311,35 @@ pub struct Sequence<T> {
 impl<T: Parse> Sequence<T> {
     /// Elements must be seprated by the `separator` token.
     /// Parsing will be stoped when `stop` token is met. Stop-token will **not** be consumed.
-    pub fn parse_till(lexer: &mut Lexer, stop: Token, separator: Token) -> AResult<Self> {
+    pub fn parse_till(tokens: &mut Tokens, stop: &Token, separator: &Token) -> AResult<Self> {
         let mut seq = Vec::new();
 
         // Do we expect to see an item right now?
         let mut is_item = true;
         loop {
-            let Some(peek) = lexer.peek_token() else {
+            let Some(peek) = tokens.peek() else {
                 break;
             };
 
-            if peek == &stop {
+            if peek == stop {
                 break;
             }
 
             if is_item {
-                let item = T::parse(lexer)?;
+                let item = T::parse(tokens)?;
                 seq.push(item);
                 is_item = !is_item;
                 continue;
             }
 
             // PANICS: TODO
-            let token = lexer.next_token().unwrap();
+            let token = tokens.next().unwrap();
             if token == separator {
                 continue;
             } else {
                 return Err(Error::UnexpectedToken {
-                    found: token,
-                    expected: ExpectedTokens::FullToken(stop),
+                    found: token.clone(),
+                    expected: ExpectedTokens::FullToken(stop.clone()),
                     expected_msg: None,
                 });
             }
@@ -344,12 +351,14 @@ impl<T: Parse> Sequence<T> {
 
 #[cfg(test)]
 mod tests {
+    use crate::lexer::Lexer;
+
     use super::*;
 
     #[test]
     fn expr_test() {
-        let mut lexer = Lexer::new("a + b * \"literal!!\"");
-        let expr = expr(&mut lexer, 0).unwrap();
+        let lexer = Lexer::new("a + b * \"literal!!\"");
+        let expr = expr(&mut lexer.tokens(), 0).unwrap();
         println!("{expr:#?}")
     }
 }
