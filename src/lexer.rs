@@ -59,6 +59,10 @@ impl Token {
             data: data.into(),
         }
     }
+
+    pub fn is(&self, kind: TokenKind) -> bool {
+        self.kind == kind
+    }
 }
 
 /// Returns (rest, tag).
@@ -318,10 +322,7 @@ impl Lexer {
     }
 
     pub fn tokens(&self) -> Tokens<'_> {
-        Tokens {
-            buffer: &self.tokens,
-            cursor: 0,
-        }
+        Tokens::new(&self.tokens)
     }
 }
 
@@ -342,21 +343,71 @@ impl Display for Lexer {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Tokens<'a> {
     buffer: &'a [Token],
+    /// Points to the **next** token.
     cursor: usize,
+    range: Range<usize>,
 }
 
 impl<'a> Tokens<'a> {
+    pub fn new(buffer: &'a [Token]) -> Self {
+        Self {
+            buffer,
+            cursor: 0,
+            range: 0..buffer.len(),
+        }
+    }
+
     /// Take an idependent iterator over a region bounded by `range`.
     pub fn region(&self, range: Range<usize>) -> Tokens<'a> {
-        let buffer = &self.buffer[range];
-        Tokens { buffer, cursor: 0 }
+        Tokens {
+            buffer: &self.buffer,
+            cursor: range.start,
+            range,
+        }
+    }
+
+    pub fn child(&self) -> Self {
+        self.clone()
     }
 
     // TODO: Should be wrapped around `Peekable<...>` instead?
     pub fn peek(&self) -> Option<&Token> {
         self.buffer.get(self.cursor)
+    }
+
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    pub fn index(&self) -> usize {
+        self.cursor - 1
+    }
+
+    /// Returns `true` if the cursor was moved and `false` if it is out of bounds.
+    pub fn move_cursor_to(&mut self, index: usize) -> bool {
+        if self.range.contains(&index) {
+            self.cursor = index;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Moves cursor to the token next to which `condition` returns `true`. Returns
+    /// `true` if the cursor was moved and `false` if matching token was not found.
+    /// In case of a falue all `next` calls will return `None`.
+    ///
+    /// That means `next` will return this token.
+    pub fn skip_till(&mut self, mut condition: impl FnMut(&Token) -> bool) -> bool {
+        while let Some(token) = self.next() {
+            if condition(token) {
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -365,9 +416,7 @@ impl<'a> Iterator for Tokens<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let idx = self.cursor;
-        if self.cursor != self.buffer.len() {
-            self.cursor += 1;
-        }
+        self.cursor = (self.cursor + 1).min(self.range.end);
         self.buffer.get(idx)
     }
 }
