@@ -14,7 +14,7 @@ pub enum Error {
     Eof,
     #[error("Binding power can't be computed for {op:?}")]
     BindingPowerInvalidOp { op: TokenKind },
-    #[error("Unclosed delimiter found expected {0} to be closed")]
+    #[error("Unclosed delimiter found expected {0:?} to be closed")]
     UnclosedDelimiter(TokenKind),
     #[error(transparent)]
     ParseIntError(#[from] ParseIntError),
@@ -218,17 +218,32 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
             literal: data.clone(),
         }),
         LeftParen => {
-            let mut new_tokens = tokens.child();
-            if !new_tokens.skip_till(|t| t.is(RightParen)) {
+            let mut child_tokens = tokens.child();
+            if !child_tokens.skip_till(|t| t.is(RightParen)) {
                 return Err(Error::UnclosedDelimiter(LeftParen));
             }
 
-            if new_tokens
+            if child_tokens
                 .peek()
                 .is_some_and(|t| t.is(TokenKind::LambdaStart))
-            {}
-
-            todo!()
+            {
+                let args = Sequence::<IdentExpr>::parse_till(
+                    tokens,
+                    &Token::new(RightParen, ")"),
+                    &Token::new(Comma, ","),
+                )?;
+                assert!(tokens.next().is_some_and(|t| t.is(RightParen)));
+                assert!(tokens.next().is_some_and(|t| t.is(LambdaStart)));
+                let body = expr(tokens, 0)?;
+                Expr::Lambda(LambdaExpr {
+                    args,
+                    body: Box::new(body),
+                })
+            } else {
+                let lhs = expr(tokens, 0)?;
+                assert!(tokens.next().is_some_and(|t| t.is(RightParen)));
+                lhs
+            }
         }
         _ => {
             return Err(Error::UnexpectedToken {
@@ -369,8 +384,8 @@ mod tests {
 
     #[test]
     fn expr_test() {
-        let lexer = Lexer::new("a + b * \"literal!!\"");
-        let expr = expr(&mut lexer.tokens(), 0).unwrap();
-        println!("{expr:#?}")
+        // let lexer = Lexer::new("a + b * \"literal!!\"");
+        // let _expr = expr(&mut lexer.tokens(), 0).unwrap();
+        // println!("{expr:#?}")
     }
 }

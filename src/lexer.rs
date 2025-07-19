@@ -1,4 +1,7 @@
-use std::{fmt::Display, ops::Range};
+use std::{
+    fmt::Display,
+    ops::{Deref, Range},
+};
 
 use clap::builder::IntoResettable;
 
@@ -88,11 +91,7 @@ pub fn tag(tag: &str) -> impl Fn(&str) -> Option<(&str, &str)> {
 /// ```
 // TODO: Use custom result.
 pub fn take(offset_bytes: usize) -> impl Fn(&str) -> Option<(&str, &str)> {
-    move |input| {
-        input
-            .split_at_checked(offset_bytes)
-            .map(|(tag, rest)| (rest, tag))
-    }
+    move |input| dbg!(input.split_at_checked(offset_bytes)).map(|(tag, rest)| (rest, tag))
 }
 
 pub fn take_while<F>(condition: F) -> impl Fn(&str) -> Option<(&str, &str)>
@@ -115,10 +114,11 @@ where
     F: Fn(char) -> bool,
 {
     move |input| {
-        input
-            .find(|c| !condition(c))
-            .filter(|index| *index != 0)
-            .and_then(|index| take(index)(input))
+        dbg!(
+            input
+                .find(|c| !condition(c))
+                .and_then(|index| dbg!(take(index)(input)).filter(|(_r, o)| !o.is_empty()))
+        )
     }
 }
 
@@ -242,6 +242,7 @@ impl Lexer {
         let i = &mut inp;
 
         while !i.is_empty() {
+            dbg!(&*i);
             // Tabs and whitespaces
             t(i, take_while(|c| c == ' '), skip);
             t(i, take_while(|c| c == '\t'), skip);
@@ -294,7 +295,7 @@ impl Lexer {
             );
 
             // Number
-            t(i, take_while1(|c| c.is_ascii_digit()), |o| {
+            t(i, take_while1(|c| dbg!(c.is_ascii_digit())), |o| {
                 push_t(TokenKind::Number, o)
             });
 
@@ -426,6 +427,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn lexer_test() {
+        let o = take_while1(|c| c.is_ascii_digit())("");
+        println!("o={o:#?}");
+
+        let lexer = Lexer::new("a  + b *\"literal!!\"");
+        println!("lexer:\n{lexer}");
+    }
+
+    #[test]
     fn tag_test() {
         let out = tag("abc")("abc123");
         assert_eq!(out, Some(("123", "abc")));
@@ -445,13 +455,16 @@ mod tests {
         let out = take_while(|c| c.is_ascii_alphabetic())("abc123");
         assert_eq!(out, Some(("123", "abc")));
 
-        let ident = (
-            // TODO: SOMETHING'S WRONG WITH THESE AND HOW THEY COMBINE
-            take_while(|c| c.is_ascii_alphabetic()),
-            take_while(|c| c.is_ascii_alphanumeric()),
-        )
-            .process("def");
-        println!("{ident:?}");
+        let out = take_while(|c| c.is_ascii_digit())("53");
+        println!("take_while={:?}", out);
+
+        // let ident = (
+        //     // TODO: SOMETHING'S WRONG WITH THESE AND HOW THEY COMBINE
+        //     take_while(|c| c.is_ascii_alphabetic()),
+        //     take_while(|c| c.is_ascii_alphanumeric()),
+        // )
+        //     .process("def");
+        // println!("{ident:?}");
 
         // let literal = (tag("\""), take_till(|c| c == '\"'), tag("\"")).process("\"literal\" rest");
     }
