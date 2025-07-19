@@ -14,6 +14,8 @@ pub enum Error {
     Eof,
     #[error("Binding power can't be computed for {op:?}")]
     BindingPowerInvalidOp { op: TokenKind },
+    #[error("Unclosed delimiter found expected {0} to be closed")]
+    UnclosedDelimiter(TokenKind),
     #[error(transparent)]
     ParseIntError(#[from] ParseIntError),
 }
@@ -95,7 +97,7 @@ impl BinaryOp {
             Slash => Self::Div,
             k => {
                 return Err(Error::UnexpectedToken {
-                    found: Token::new(k, data.clone()),
+                    found: Token::new(k, data),
                     expected: ExpectedTokens::OneOf(&[Plus, Minus, Star, Slash]),
                     expected_msg: None,
                 });
@@ -216,6 +218,16 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
             literal: data.clone(),
         }),
         LeftParen => {
+            let mut new_tokens = tokens.child();
+            if !new_tokens.skip_till(|t| t.is(RightParen)) {
+                return Err(Error::UnclosedDelimiter(LeftParen));
+            }
+
+            if new_tokens
+                .peek()
+                .is_some_and(|t| t.is(TokenKind::LambdaStart))
+            {}
+
             todo!()
         }
         _ => {
