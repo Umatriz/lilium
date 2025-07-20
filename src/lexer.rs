@@ -75,23 +75,27 @@ pub fn tag(tag: &str) -> impl Fn(&str) -> Option<(&str, &str)> {
     move |input| {
         let len = tag.len();
         if input.starts_with(tag) {
-            take(len)(input)
+            Some((take_from(input, len), take(input, len)))
         } else {
             None
         }
     }
 }
 
-/// ## Examples
-/// ```rust
-/// # use lilium::lexer::take;
-/// let s = "Hello World!";
-/// let out = take(5)(s);
-/// assert_eq!(out, Some((" World!", "Hello")));
-/// ```
+// / ## Examples
+// / ```rust
+// / # use lilium::lexer::take;
+// / let s = "Hello World!";
+// / let out = take(s, 5);
+// / assert_eq!(out, "Hello");
+// / ```
 // TODO: Use custom result.
-pub fn take(offset_bytes: usize) -> impl Fn(&str) -> Option<(&str, &str)> {
-    move |input| dbg!(input.split_at_checked(offset_bytes)).map(|(tag, rest)| (rest, tag))
+pub fn take(input: &str, index: usize) -> &str {
+    &input[..index]
+}
+
+pub fn take_from(input: &str, index: usize) -> &str {
+    &input[index..]
 }
 
 pub fn take_while<F>(condition: F) -> impl Fn(&str) -> Option<(&str, &str)>
@@ -101,10 +105,11 @@ where
     move |input| {
         input
             .find(|c| !condition(c))
-            .and_then(|index| take(index)(input))
+            .map(|index| (take_from(input, index), take(input, index)))
+            // If there's no non-matching character then all input is valid
             .or_else(|| {
                 let len = input.len();
-                take(len)(input)
+                Some((take_from(input, len), take(input, len)))
             })
     }
 }
@@ -113,20 +118,18 @@ pub fn take_while1<F>(condition: F) -> impl Fn(&str) -> Option<(&str, &str)>
 where
     F: Fn(char) -> bool,
 {
-    move |input| {
-        dbg!(
-            input
-                .find(|c| !condition(c))
-                .and_then(|index| dbg!(take(index)(input)).filter(|(_r, o)| !o.is_empty()))
-        )
-    }
+    move |input| take_while(&condition)(input).filter(|(_, o)| !o.is_empty())
 }
 
 pub fn take_till<F>(condition: F) -> impl Fn(&str) -> Option<(&str, &str)>
 where
     F: Fn(char) -> bool,
 {
-    move |input| input.find(&condition).and_then(|index| take(index)(input))
+    move |input| {
+        input
+            .find(&condition)
+            .map(|index| (take_from(input, index), take(input, index)))
+    }
 }
 
 pub fn many0<I: Clone, O>(
@@ -242,7 +245,6 @@ impl Lexer {
         let i = &mut inp;
 
         while !i.is_empty() {
-            dbg!(&*i);
             // Tabs and whitespaces
             t(i, take_while(|c| c == ' '), skip);
             t(i, take_while(|c| c == '\t'), skip);
@@ -295,7 +297,7 @@ impl Lexer {
             );
 
             // Number
-            t(i, take_while1(|c| dbg!(c.is_ascii_digit())), |o| {
+            t(i, take_while1(|c| c.is_ascii_digit()), |o| {
                 push_t(TokenKind::Number, o)
             });
 
@@ -456,17 +458,19 @@ mod tests {
         assert_eq!(out, Some(("123", "abc")));
 
         let out = take_while(|c| c.is_ascii_digit())("53");
-        println!("take_while={:?}", out);
+        assert_eq!(out, Some(("", "53")));
 
-        // let ident = (
-        //     // TODO: SOMETHING'S WRONG WITH THESE AND HOW THEY COMBINE
-        //     take_while(|c| c.is_ascii_alphabetic()),
-        //     take_while(|c| c.is_ascii_alphanumeric()),
-        // )
-        //     .process("def");
-        // println!("{ident:?}");
+        let out = take_while1(|c| c.is_ascii_digit())("as");
+        assert_eq!(out, None);
 
-        // let literal = (tag("\""), take_till(|c| c == '\"'), tag("\"")).process("\"literal\" rest");
+        let out = take_while1(|c| c.is_ascii_digit())("123as");
+        assert_eq!(out, Some(("as", "123")));
+
+        let out = take_while1(|c| c.is_ascii_digit())("as123");
+        assert_eq!(out, None);
+
+        let out = take_while1(|c| c.is_ascii_digit())("123");
+        assert_eq!(out, Some(("", "123")));
     }
 
     #[test]
