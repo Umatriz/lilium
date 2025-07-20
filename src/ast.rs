@@ -230,7 +230,7 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
                 let args = Sequence::<IdentExpr>::parse_till(
                     tokens,
                     &Token::new(RightParen, ")"),
-                    &Token::new(Comma, ","),
+                    Some(&Token::new(Comma, ",")),
                 )?;
                 assert!(tokens.next().is_some_and(|t| t.is(RightParen)));
                 assert!(tokens.next().is_some_and(|t| t.is(LambdaStart)));
@@ -338,17 +338,21 @@ pub struct Sequence<T> {
 impl<T: Parse> Sequence<T> {
     /// Elements must be seprated by the `separator` token.
     /// Parsing will be stoped when `stop` token is met. Stop-token will **not** be consumed.
-    pub fn parse_till(tokens: &mut Tokens, stop: &Token, separator: &Token) -> AResult<Self> {
+    pub fn parse_till(
+        tokens: &mut Tokens,
+        stop: &Token,
+        separator: Option<&Token>,
+    ) -> AResult<Self> {
         let mut seq = Vec::new();
 
         // Do we expect to see an item right now?
         let mut is_item = true;
         loop {
-            let Some(peek) = tokens.peek() else {
+            let Some(token) = tokens.peek() else {
                 break;
             };
 
-            if peek == stop {
+            if token == stop {
                 break;
             }
 
@@ -359,16 +363,18 @@ impl<T: Parse> Sequence<T> {
                 continue;
             }
 
-            // PANICS: TODO
-            let token = tokens.next().unwrap();
-            if token == separator {
-                continue;
-            } else {
-                return Err(Error::UnexpectedToken {
-                    found: token.clone(),
-                    expected: ExpectedTokens::FullToken(stop.clone()),
-                    expected_msg: None,
-                });
+            if let Some(sep) = separator {
+                // PANICS: TODO
+                let token = tokens.next().unwrap();
+                if token == sep {
+                    continue;
+                } else {
+                    return Err(Error::UnexpectedToken {
+                        found: token.clone(),
+                        expected: ExpectedTokens::FullToken(stop.clone()),
+                        expected_msg: None,
+                    });
+                }
             }
         }
 

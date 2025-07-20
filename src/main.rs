@@ -24,10 +24,15 @@ fn main() {
     if let Some(sub) = matches.subcommand_matches("tree") {
         let code = sub.get_one::<String>("code").unwrap();
         println!("{code}");
+        println!();
+
         let lexer = Lexer::new(code);
         println!("Lexed results are:\n{lexer}");
-        // let expr = expr(&mut lexer.tokens(), 0).unwrap();
-        // println!("{expr:?}");
+        println!();
+
+        let expr = expr(&mut lexer.tokens(), 0).unwrap();
+        println!("Tree:");
+        println!("{expr:#?}");
     }
 
     // let expr = args.nth(1).expect("No expression to parse");
