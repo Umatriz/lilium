@@ -381,6 +381,12 @@ impl<'a> Tokens<'a> {
         self.buffer.get(self.cursor)
     }
 
+    /// Peeks `n` elements furthen.
+    /// `peek_n(0)` is equal to `peek()`.
+    pub fn peek_n(&self, n: usize) -> Option<&Token> {
+        self.buffer.get(self.cursor + b)
+    }
+
     pub fn cursor(&self) -> usize {
         self.cursor
     }
@@ -399,11 +405,11 @@ impl<'a> Tokens<'a> {
         }
     }
 
-    /// Moves cursor to the token next to which `condition` returns `true`. Returns
-    /// `true` if the cursor was moved and `false` if matching token was not found.
+    /// Moves cursor to the token next to the one for which `condition` returned `true`.
+    /// Returns `true` if the cursor was moved and `false` if matching token was not found.
     /// In case of a falue all `next` calls will return `None`.
     ///
-    /// That means `next` will return this token.
+    /// Calling `next` after this method will return the token following the mactched one.
     pub fn skip_till(&mut self, mut condition: impl FnMut(&Token) -> bool) -> bool {
         while let Some(token) = self.next() {
             if condition(token) {

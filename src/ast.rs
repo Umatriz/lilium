@@ -1,4 +1,4 @@
-use std::{fmt::Display, num::ParseIntError};
+use std::{borrow::Cow, fmt::Display, num::ParseIntError};
 
 use crate::lexer::{Token, TokenKind, Tokens};
 
@@ -10,6 +10,8 @@ pub enum Error {
         expected: ExpectedTokens,
         expected_msg: Option<&'static str>,
     },
+    #[error("Failed to parse {0}")]
+    FailedToParse(Cow<'static, str>),
     #[error("Reached end of file")]
     Eof,
     #[error("Binding power can't be computed for {op:?}")]
@@ -125,6 +127,76 @@ pub struct LambdaExpr {
     body: Box<Expr>,
 }
 
+impl Parse for LambdaExpr {
+    fn parse(tokens: &mut Tokens) -> AResult<Self>
+    where
+        Self: Sized,
+    {
+        match tokens.next() {
+            // Lambda with only one arg of a form `x |-> ...`
+            Some(t)
+                if t.is(TokenKind::Ident)
+                    && tokens.peek().is_some_and(|t| t.is(TokenKind::LambdaStart)) =>
+            {
+                let arg = IdentExpr::parse(tokens)?;
+                assert!(tokens.next().is_some_and(|t| t.is(TokenKind::LambdaStart)));
+                let body = expr(tokens, 0)?;
+                Ok(Self {
+                    args: Sequence { seq: vec![arg] },
+                    body: Box::new(body),
+                })
+            }
+            // Lambda with multiple args of a form `(x1 x2 ...) |-> ...`
+            Some(t) if t.is(TokenKind::LeftParen) => {
+                let mut child_tokens = tokens.child();
+
+                if !child_tokens.skip_till(|t| t.is(TokenKind::RightParen)) {
+                    return Err(Error::UnclosedDelimiter(TokenKind::LeftParen));
+                }
+
+                if !child_tokens
+                    .peek()
+                    .is_some_and(|t| t.is(TokenKind::LambdaStart))
+                {
+                    return Err(Error::FailedToParse(
+                        "a lambda expression. Start was not found, this is a sequence or an expression.".into(),
+                    ));
+                }
+
+                let args = Sequence::<IdentExpr>::parse_till(
+                    tokens,
+                    &Token::new(TokenKind::RightParen, ")"),
+                    None,
+                )?;
+
+                let token = tokens.next();
+                if !token.is_some_and(|t| t.is(TokenKind::LambdaStart)) {
+                    return Err(Error::UnexpectedToken {
+                        found: token.cloned().unwrap_or(Token::EOF),
+                        expected: ExpectedTokens::Single(TokenKind::LambdaStart),
+                        expected_msg: None,
+                    });
+                }
+
+                let body = expr(tokens, 0)?;
+
+                Ok(Self {
+                    args,
+                    body: Box::new(body),
+                })
+            }
+            t => {
+                let t = t.cloned().unwrap_or(Token::EOF);
+                Err(Error::UnexpectedToken {
+                    found: t.clone(),
+                    expected: ExpectedTokens::OneOf(&[TokenKind::Ident, TokenKind::LeftParen]),
+                    expected_msg: Some(" expected a lambda expression"),
+                })
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct LiteralExp {
     // TODO: Maybe use &'a str
@@ -230,7 +302,8 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
                 let args = Sequence::<IdentExpr>::parse_till(
                     tokens,
                     &Token::new(RightParen, ")"),
-                    Some(&Token::new(Comma, ",")),
+                    // Some(&Token::new(Comma, ",")),
+                    None,
                 )?;
                 assert!(tokens.next().is_some_and(|t| t.is(RightParen)));
                 assert!(tokens.next().is_some_and(|t| t.is(LambdaStart)));
@@ -359,8 +432,9 @@ impl<T: Parse> Sequence<T> {
             if is_item {
                 let item = T::parse(tokens)?;
                 seq.push(item);
-                is_item = !is_item;
-                continue;
+                if separator.is_some() {
+                    is_item = !is_item;
+                }
             }
 
             if let Some(sep) = separator {
