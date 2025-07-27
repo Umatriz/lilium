@@ -290,6 +290,11 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
         Literal => Expr::Literal(LiteralExp {
             literal: data.clone(),
         }),
+        LeftParen => {
+            let lhs = expr(tokens, 0)?;
+            assert!(tokens.next().is_some_and(|t| t.is(RightParen)));
+            lhs
+        }
         _ => {
             return Err(Error::UnexpectedToken {
                 found: Token {
