@@ -67,7 +67,8 @@ pub trait Parse {
 pub enum Expr {
     Binary(BinaryExpr),
     Unary(UnaryExpr),
-    Block(Vec<Box<Expr>>),
+    // Block(Vec<Box<Expr>>),
+    Sequece(Sequence<Box<Expr>>),
     Lambda(LambdaExpr),
     Literal(LiteralExp),
     Integer(IntegerExpr),
@@ -123,79 +124,79 @@ enum UnaryOp {
 
 #[derive(Debug)]
 pub struct LambdaExpr {
-    args: Sequence<IdentExpr>,
+    args: Sequence<Box<Expr>>,
     body: Box<Expr>,
 }
 
-impl Parse for LambdaExpr {
-    fn parse(tokens: &mut Tokens) -> AResult<Self>
-    where
-        Self: Sized,
-    {
-        match tokens.next() {
-            // Lambda with only one arg of a form `x |-> ...`
-            Some(t)
-                if t.is(TokenKind::Ident)
-                    && tokens.peek().is_some_and(|t| t.is(TokenKind::LambdaStart)) =>
-            {
-                let arg = IdentExpr::parse(tokens)?;
-                assert!(tokens.next().is_some_and(|t| t.is(TokenKind::LambdaStart)));
-                let body = expr(tokens, 0)?;
-                Ok(Self {
-                    args: Sequence { seq: vec![arg] },
-                    body: Box::new(body),
-                })
-            }
-            // Lambda with multiple args of a form `(x1 x2 ...) |-> ...`
-            Some(t) if t.is(TokenKind::LeftParen) => {
-                let mut child_tokens = tokens.child();
+// impl Parse for LambdaExpr {
+//     fn parse(tokens: &mut Tokens) -> AResult<Self>
+//     where
+//         Self: Sized,
+//     {
+//         match tokens.next() {
+//             // Lambda with only one arg of a form `x |-> ...`
+//             Some(t)
+//                 if t.is(TokenKind::Ident)
+//                     && tokens.peek().is_some_and(|t| t.is(TokenKind::LambdaStart)) =>
+//             {
+//                 let arg = IdentExpr::parse(tokens)?;
+//                 assert!(tokens.next().is_some_and(|t| t.is(TokenKind::LambdaStart)));
+//                 let body = expr(tokens, 0)?;
+//                 Ok(Self {
+//                     args: Sequence { seq: vec![arg] },
+//                     body: Box::new(body),
+//                 })
+//             }
+//             // Lambda with multiple args of a form `(x1 x2 ...) |-> ...`
+//             Some(t) if t.is(TokenKind::LeftParen) => {
+//                 let mut child_tokens = tokens.child();
 
-                if !child_tokens.skip_till(|t| t.is(TokenKind::RightParen)) {
-                    return Err(Error::UnclosedDelimiter(TokenKind::LeftParen));
-                }
+//                 if !child_tokens.skip_till(|t| t.is(TokenKind::RightParen)) {
+//                     return Err(Error::UnclosedDelimiter(TokenKind::LeftParen));
+//                 }
 
-                if !child_tokens
-                    .peek()
-                    .is_some_and(|t| t.is(TokenKind::LambdaStart))
-                {
-                    return Err(Error::FailedToParse(
-                        "a lambda expression. Start was not found, this is a sequence or an expression.".into(),
-                    ));
-                }
+//                 if !child_tokens
+//                     .peek()
+//                     .is_some_and(|t| t.is(TokenKind::LambdaStart))
+//                 {
+//                     return Err(Error::FailedToParse(
+//                         "a lambda expression. Start was not found, this is a sequence or an expression.".into(),
+//                     ));
+//                 }
 
-                let args = Sequence::<IdentExpr>::parse_till(
-                    tokens,
-                    &Token::new(TokenKind::RightParen, ")"),
-                    None,
-                )?;
+//                 let args = Sequence::<IdentExpr>::parse_till(
+//                     tokens,
+//                     &Token::new(TokenKind::RightParen, ")"),
+//                     None,
+//                 )?;
 
-                let token = tokens.next();
-                if !token.is_some_and(|t| t.is(TokenKind::LambdaStart)) {
-                    return Err(Error::UnexpectedToken {
-                        found: token.cloned().unwrap_or(Token::EOF),
-                        expected: ExpectedTokens::Single(TokenKind::LambdaStart),
-                        expected_msg: None,
-                    });
-                }
+//                 let token = tokens.next();
+//                 if !token.is_some_and(|t| t.is(TokenKind::LambdaStart)) {
+//                     return Err(Error::UnexpectedToken {
+//                         found: token.cloned().unwrap_or(Token::EOF),
+//                         expected: ExpectedTokens::Single(TokenKind::LambdaStart),
+//                         expected_msg: None,
+//                     });
+//                 }
 
-                let body = expr(tokens, 0)?;
+//                 let body = expr(tokens, 0)?;
 
-                Ok(Self {
-                    args,
-                    body: Box::new(body),
-                })
-            }
-            t => {
-                let t = t.cloned().unwrap_or(Token::EOF);
-                Err(Error::UnexpectedToken {
-                    found: t.clone(),
-                    expected: ExpectedTokens::OneOf(&[TokenKind::Ident, TokenKind::LeftParen]),
-                    expected_msg: Some(" expected a lambda expression"),
-                })
-            }
-        }
-    }
-}
+//                 Ok(Self {
+//                     args,
+//                     body: Box::new(body),
+//                 })
+//             }
+//             t => {
+//                 let t = t.cloned().unwrap_or(Token::EOF);
+//                 Err(Error::UnexpectedToken {
+//                     found: t.clone(),
+//                     expected: ExpectedTokens::OneOf(&[TokenKind::Ident, TokenKind::LeftParen]),
+//                     expected_msg: Some(" expected a lambda expression"),
+//                 })
+//             }
+//         }
+//     }
+// }
 
 #[derive(Debug)]
 pub struct LiteralExp {
@@ -289,35 +290,6 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
         Literal => Expr::Literal(LiteralExp {
             literal: data.clone(),
         }),
-        LeftParen => {
-            let mut child_tokens = tokens.child();
-            if !child_tokens.skip_till(|t| t.is(RightParen)) {
-                return Err(Error::UnclosedDelimiter(LeftParen));
-            }
-
-            if child_tokens
-                .peek()
-                .is_some_and(|t| t.is(TokenKind::LambdaStart))
-            {
-                let args = Sequence::<IdentExpr>::parse_till(
-                    tokens,
-                    &Token::new(RightParen, ")"),
-                    // Some(&Token::new(Comma, ",")),
-                    None,
-                )?;
-                assert!(tokens.next().is_some_and(|t| t.is(RightParen)));
-                assert!(tokens.next().is_some_and(|t| t.is(LambdaStart)));
-                let body = expr(tokens, 0)?;
-                Expr::Lambda(LambdaExpr {
-                    args,
-                    body: Box::new(body),
-                })
-            } else {
-                let lhs = expr(tokens, 0)?;
-                assert!(tokens.next().is_some_and(|t| t.is(RightParen)));
-                lhs
-            }
-        }
         _ => {
             return Err(Error::UnexpectedToken {
                 found: Token {
@@ -338,7 +310,7 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
             break;
         }
 
-        if let Some((l_bp, r_bp)) = binding_power(kind)?.infix {
+        if let Some((l_bp, r_bp)) = binding_power(kind).ok().and_then(|bp| bp.infix) {
             if l_bp < min_bp {
                 break;
             }
@@ -354,6 +326,13 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
 
             continue;
         }
+
+        // All previous varians have failed which means it's a sequece
+        let rhs = expr(tokens, 0)?;
+        let sequece = Sequence {
+            seq: vec![Box::new(lhs), Box::new(rhs)],
+        };
+        lhs = Expr::Sequece(sequece);
 
         break;
     }

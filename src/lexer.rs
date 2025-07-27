@@ -1,9 +1,4 @@
-use std::{
-    fmt::Display,
-    ops::{Deref, Range},
-};
-
-use clap::builder::IntoResettable;
+use std::{fmt::Display, ops::Range};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
@@ -384,7 +379,7 @@ impl<'a> Tokens<'a> {
     /// Peeks `n` elements furthen.
     /// `peek_n(0)` is equal to `peek()`.
     pub fn peek_n(&self, n: usize) -> Option<&Token> {
-        self.buffer.get(self.cursor + b)
+        self.buffer.get(self.cursor + n)
     }
 
     pub fn cursor(&self) -> usize {
