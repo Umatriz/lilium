@@ -119,7 +119,29 @@ pub struct UnaryExpr {
 
 #[derive(Debug)]
 enum UnaryOp {
+    // TODO: Maybe change the name...
+    MarkPositive,
     Negate,
+}
+
+impl TryFrom<TokenKind> for UnaryOp {
+    type Error = Error;
+
+    fn try_from(value: TokenKind) -> Result<Self, Self::Error> {
+        let op = match value {
+            TokenKind::Plus => UnaryOp::MarkPositive,
+            TokenKind::Minus => UnaryOp::Negate,
+            t => {
+                return Err(Error::UnexpectedToken {
+                    found: Token::new(t, "UNAVAILABLE"),
+                    expected: ExpectedTokens::OneOf(&[TokenKind::Plus, TokenKind::Minus]),
+                    expected_msg: None,
+                });
+            }
+        };
+
+        OK(op)
+    }
 }
 
 #[derive(Debug)]
@@ -281,6 +303,8 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
         return Err(Error::Eof);
     };
 
+    let bp_opt = binding_power(*kind).ok();
+
     use TokenKind::*;
     let mut lhs = match kind {
         Number => Expr::Integer(IntegerExpr { int: data.parse()? }),
@@ -294,6 +318,16 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
             let lhs = expr(tokens, 0)?;
             assert!(tokens.next().is_some_and(|t| t.is(RightParen)));
             lhs
+        }
+        t if bp_opt.is_some_and(|bp| bp.prefix.is_some()) => {
+            // PANICS: We can unwrap here because the statement is
+            // unreachable unless it's `Some`.
+            let right_bp = bp_opt.and_then(|bp| bp.prefix).unwrap();
+            let rhs = expr(tokens, right_bp)?;
+            Expr::Unary(UnaryExpr {
+                item: Box::new(rhs),
+                op: UnaryOp::try_from(*t)?,
+            })
         }
         _ => {
             return Err(Error::UnexpectedToken {
@@ -345,7 +379,7 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
     Ok(lhs)
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy)]
 struct BindingPower {
     /// Right power.
     pub prefix: Option<u8>,
