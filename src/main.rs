@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{ArgAction, Command, arg, value_parser};
+use clap::{Command, arg, value_parser};
 use lilium::{
     ast::{Expr, expr},
     lexer::Lexer,

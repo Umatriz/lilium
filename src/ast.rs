@@ -540,9 +540,9 @@ impl<T: Parse> Sequence<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::lexer::Lexer;
+    
 
-    use super::*;
+    
 
     #[test]
     fn expr_test() {

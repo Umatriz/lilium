@@ -42,6 +42,7 @@ pub enum TokenKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     pub kind: TokenKind,
+    // TODO: Use `Span` that can slice the original string instead of `String`
     pub data: String,
 }
 
