@@ -68,11 +68,35 @@ pub enum Expr {
     Binary(BinaryExpr),
     Unary(UnaryExpr),
     // Block(Vec<Box<Expr>>),
-    Sequece(Sequence<Box<Expr>>),
+    Sequence(Sequence<Expr>),
     Lambda(LambdaExpr),
     Literal(LiteralExp),
     Integer(IntegerExpr),
     Ident(IdentExpr),
+}
+
+impl Expr {
+    pub fn flatten_sequence(self) -> Self {
+        fn flatten(buffer: &mut Vec<Expr>, sequence: Expr) -> Option<()> {
+            match sequence {
+                Expr::Sequence(Sequence { mut seq }) => {
+                    let expr = seq.pop()?;
+                    let child_seq = seq.pop()?;
+                    buffer.push(expr);
+                    flatten(buffer, child_seq)
+                }
+                e => {
+                    buffer.push(e);
+                    Some(())
+                }
+            }
+        }
+
+        let mut seq = Vec::new();
+        flatten(&mut seq, self);
+        seq.reverse();
+        Self::Sequence(Sequence { seq })
+    }
 }
 
 #[derive(Debug)]
@@ -140,13 +164,13 @@ impl TryFrom<TokenKind> for UnaryOp {
             }
         };
 
-        OK(op)
+        Ok(op)
     }
 }
 
 #[derive(Debug)]
 pub struct LambdaExpr {
-    args: Sequence<Box<Expr>>,
+    args: Box<Expr>,
     body: Box<Expr>,
 }
 
@@ -299,47 +323,53 @@ impl Parse for IdentExpr {
 }
 
 pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
-    let Some(Token { kind, data }) = tokens.next() else {
-        return Err(Error::Eof);
-    };
+    fn eat_atom(tokens: &mut Tokens) -> AResult<Expr> {
+        let Some(Token { kind, data }) = tokens.next() else {
+            return Err(Error::Eof);
+        };
 
-    let bp_opt = binding_power(*kind).ok();
+        let bp_opt = binding_power(*kind).ok();
+
+        use TokenKind::*;
+        let expr = match kind {
+            Number => Expr::Integer(IntegerExpr { int: data.parse()? }),
+            Ident => Expr::Ident(IdentExpr {
+                ident: data.clone(),
+            }),
+            Literal => Expr::Literal(LiteralExp {
+                literal: data.clone(),
+            }),
+            LeftParen => {
+                let lhs = expr(tokens, 0)?;
+                assert!(tokens.next().is_some_and(|t| t.is(RightParen)));
+                lhs
+            }
+            t if bp_opt.is_some_and(|bp| bp.prefix.is_some()) => {
+                // PANICS: We can unwrap here because the statement is
+                // unreachable unless it's `Some`.
+                let right_bp = bp_opt.and_then(|bp| bp.prefix).unwrap();
+                let rhs = expr(tokens, right_bp)?;
+                Expr::Unary(UnaryExpr {
+                    item: Box::new(rhs),
+                    op: UnaryOp::try_from(*t)?,
+                })
+            }
+            _ => {
+                return Err(Error::UnexpectedToken {
+                    found: Token {
+                        kind: *kind,
+                        data: data.clone(),
+                    },
+                    expected: ExpectedTokens::OneOf(&[Number, Ident, Literal]),
+                    expected_msg: Some(" or a lambda expression"),
+                });
+            }
+        };
+        Ok(expr)
+    }
 
     use TokenKind::*;
-    let mut lhs = match kind {
-        Number => Expr::Integer(IntegerExpr { int: data.parse()? }),
-        Ident => Expr::Ident(IdentExpr {
-            ident: data.clone(),
-        }),
-        Literal => Expr::Literal(LiteralExp {
-            literal: data.clone(),
-        }),
-        LeftParen => {
-            let lhs = expr(tokens, 0)?;
-            assert!(tokens.next().is_some_and(|t| t.is(RightParen)));
-            lhs
-        }
-        t if bp_opt.is_some_and(|bp| bp.prefix.is_some()) => {
-            // PANICS: We can unwrap here because the statement is
-            // unreachable unless it's `Some`.
-            let right_bp = bp_opt.and_then(|bp| bp.prefix).unwrap();
-            let rhs = expr(tokens, right_bp)?;
-            Expr::Unary(UnaryExpr {
-                item: Box::new(rhs),
-                op: UnaryOp::try_from(*t)?,
-            })
-        }
-        _ => {
-            return Err(Error::UnexpectedToken {
-                found: Token {
-                    kind: *kind,
-                    data: data.clone(),
-                },
-                expected: ExpectedTokens::OneOf(&[Number, Ident, Literal]),
-                expected_msg: Some(" or a lambda expression"),
-            });
-        }
-    };
+    let mut lhs = eat_atom(tokens)?;
 
     loop {
         let Some(Token { kind, data }) = tokens.peek().cloned() else {
@@ -349,13 +379,25 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
             break;
         }
 
-        if let Some((l_bp, r_bp)) = binding_power(kind).ok().and_then(|bp| bp.infix) {
+        let bp = binding_power(kind).ok();
+
+        if let Some((l_bp, r_bp)) = bp.and_then(|bp| bp.infix) {
             if l_bp < min_bp {
                 break;
             }
 
             tokens.next();
             let rhs = expr(tokens, r_bp)?;
+
+            if kind == LambdaStart {
+                let ex = Expr::Lambda(LambdaExpr {
+                    args: Box::new(lhs.flatten_sequence()),
+                    body: Box::new(rhs),
+                });
+                lhs = ex;
+                continue;
+            }
+
             let ex = Expr::Binary(BinaryExpr {
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
@@ -366,12 +408,29 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
             continue;
         }
 
-        // All previous varians have failed which means it's a sequece
-        let rhs = expr(tokens, 0)?;
-        let sequece = Sequence {
-            seq: vec![Box::new(lhs), Box::new(rhs)],
-        };
-        lhs = Expr::Sequece(sequece);
+        // Sequence handling
+        match eat_atom(tokens) {
+            Ok(atom) => {
+                lhs = Expr::Sequence(Sequence {
+                    seq: vec![lhs, atom],
+                });
+                continue;
+            }
+            Err(e) => {
+                println!("Sequence parsing error: {e}");
+            }
+        }
+
+        // if bp.is_none() {
+        //     // All previous varians have failed which means it's a sequece
+        //     let rhs = dbg!(expr(tokens, 0))?;
+        //     let sequece = Sequence {
+        //         seq: vec![lhs, rhs],
+        //     };
+        //     lhs = Expr::Sequence(sequece);
+
+        //     continue;
+        // }
 
         break;
     }
@@ -408,6 +467,10 @@ impl BindingPower {
         self.postfix = Some(power);
         self
     }
+
+    fn is_any(&self) -> bool {
+        self.prefix.is_some() || self.infix.is_some() || self.postfix.is_some()
+    }
 }
 
 fn binding_power(kind: TokenKind) -> AResult<BindingPower> {
@@ -416,6 +479,7 @@ fn binding_power(kind: TokenKind) -> AResult<BindingPower> {
         Plus | Minus => BindingPower::new().prefix(9).infix(5, 6),
         Star | Slash => BindingPower::new().infix(7, 8),
         ExplanationMark | LeftBracket => BindingPower::new().postfix(11),
+        LambdaStart => BindingPower::new().infix(2, 1),
         _ => return Err(Error::BindingPowerInvalidOp { op: kind }),
     };
     Ok(power)

@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
 use clap::{ArgAction, Command, arg, value_parser};
-use lilium::{ast::expr, lexer::Lexer};
+use lilium::{
+    ast::{Expr, expr},
+    lexer::Lexer,
+};
 
 fn main() {
     let matches = Command::new("lilium")
@@ -30,8 +33,11 @@ fn main() {
         println!("Lexed results are:\n{lexer}");
         println!();
 
-        let expr = expr(&mut lexer.tokens(), 0).unwrap();
+        let mut expr = expr(&mut lexer.tokens(), 0).unwrap();
         println!("Tree:");
+        if matches!(expr, Expr::Sequence(_)) {
+            expr = expr.flatten_sequence();
+        }
         println!("{expr:#?}");
     }
 
