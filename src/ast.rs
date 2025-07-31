@@ -1,6 +1,6 @@
 use std::{borrow::Cow, fmt::Display, num::ParseIntError};
 
-use crate::lexer::{Token, TokenKind, Tokens};
+use crate::lexer::{Span, Token, TokenKind, Tokens};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -115,7 +115,7 @@ enum BinaryOp {
 }
 
 impl BinaryOp {
-    fn new(kind: TokenKind, data: &str) -> AResult<Self> {
+    fn new(kind: TokenKind, span: Span) -> AResult<Self> {
         use TokenKind::*;
         let op = match kind {
             Plus => Self::Add,
@@ -124,7 +124,7 @@ impl BinaryOp {
             Slash => Self::Div,
             k => {
                 return Err(Error::UnexpectedToken {
-                    found: Token::new(k, data),
+                    found: Token::new(k, span),
                     expected: ExpectedTokens::OneOf(&[Plus, Minus, Star, Slash]),
                     expected_msg: None,
                 });
@@ -148,16 +148,16 @@ enum UnaryOp {
     Negate,
 }
 
-impl TryFrom<TokenKind> for UnaryOp {
+impl TryFrom<Token> for UnaryOp {
     type Error = Error;
 
-    fn try_from(value: TokenKind) -> Result<Self, Self::Error> {
-        let op = match value {
+    fn try_from(value: Token) -> Result<Self, Self::Error> {
+        let op = match value.kind {
             TokenKind::Plus => UnaryOp::MarkPositive,
             TokenKind::Minus => UnaryOp::Negate,
             t => {
                 return Err(Error::UnexpectedToken {
-                    found: Token::new(t, "UNAVAILABLE"),
+                    found: value,
                     expected: ExpectedTokens::OneOf(&[TokenKind::Plus, TokenKind::Minus]),
                     expected_msg: None,
                 });
@@ -258,7 +258,7 @@ impl Parse for LiteralExp {
         match tokens.next().cloned() {
             Some(Token {
                 kind: TokenKind::Literal,
-                data,
+                span,
             }) => Ok(Self { literal: data }),
             Some(t) => Err(Error::UnexpectedToken {
                 found: t,
@@ -540,9 +540,6 @@ impl<T: Parse> Sequence<T> {
 
 #[cfg(test)]
 mod tests {
-    
-
-    
 
     #[test]
     fn expr_test() {

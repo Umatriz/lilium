@@ -40,23 +40,20 @@ pub enum TokenKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Span {
+    start: usize,
+    end: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     pub kind: TokenKind,
-    // TODO: Use `Span` that can slice the original string instead of `String`
-    pub data: String,
+    pub span: Span,
 }
 
 impl Token {
-    pub const EOF: Self = Self {
-        kind: TokenKind::Eof,
-        data: String::new(),
-    };
-
-    pub fn new(kind: TokenKind, data: impl Into<String>) -> Self {
-        Self {
-            kind,
-            data: data.into(),
-        }
+    pub fn new(kind: TokenKind, span: Span) -> Self {
+        Self { kind, span }
     }
 
     pub fn is(&self, kind: TokenKind) -> bool {
@@ -218,23 +215,38 @@ impl Lexer {
         fn t<I: Copy, O>(
             inp: &mut I,
             mut combinator: impl Combinator<I, Output = O>,
-            fun: impl FnOnce(O),
+            fun: impl FnOnce(I, O),
         ) -> bool {
             if let Some((i, out)) = combinator.process(*inp) {
                 *inp = i;
-                fun(out);
+                fun(i, out);
                 true
             } else {
                 false
             }
         }
 
-        fn skip<O>(_: O) {}
+        fn skip<I, O>(_: I, _: O) {}
 
         let mut tokens = Vec::new();
 
-        let mut push_t = |kind, data: &str| {
-            tokens.push(Token::new(kind, data));
+        // let mut push_t = |kind, data: &str| {
+        //     tokens.push(Token::new(kind, data));
+        // };
+
+        let initial_len = source.len();
+        let make_span = |rest: &str, data: &str| {
+            let start = initial_len - rest.len();
+            Span {
+                start,
+                end: start + data.len(),
+            }
+        };
+        let mut push = |kind| {
+            |rest: &str, data: &str| {
+                let span = make_span(rest, data);
+                tokens.push(Token::new(kind, span));
+            }
         };
 
         let mut inp = source;
@@ -246,50 +258,49 @@ impl Lexer {
             t(i, take_while(|c| c == '\t'), skip);
 
             // Newlines
-            t(i, many1(tag("\r\n")), |_| {
-                push_t(TokenKind::NewLine, "NEW_LINE")
-            });
-            t(i, many1(tag("\n")), |_| {
-                push_t(TokenKind::NewLine, "NEW_LINE")
-            });
-            t(i, many1(tag("\r")), |_| {
-                push_t(TokenKind::NewLine, "NEW_LINE")
-            });
+            t(i, many1(tag("\r\n")), skip);
+            t(i, many1(tag("\n")), skip);
+            t(i, many1(tag("\r")), skip);
 
             // Delimiters
-            t(i, tag("("), |o| push_t(TokenKind::LeftParen, o));
-            t(i, tag(")"), |o| push_t(TokenKind::RightParen, o));
-            t(i, tag("["), |o| push_t(TokenKind::LeftBracket, o));
-            t(i, tag("]"), |o| push_t(TokenKind::RightBracket, o));
-            t(i, tag("{"), |o| push_t(TokenKind::LeftBrace, o));
-            t(i, tag("}"), |o| push_t(TokenKind::RightBrace, o));
+            t(i, tag("("), push(TokenKind::LeftParen));
+            t(i, tag(")"), push(TokenKind::RightParen));
+            t(i, tag("["), push(TokenKind::LeftBracket));
+            t(i, tag("]"), push(TokenKind::RightBracket));
+            t(i, tag("{"), push(TokenKind::LeftBrace));
+            t(i, tag("}"), push(TokenKind::RightBrace));
 
             // Arrows
-            t(i, tag("->"), |o| push_t(TokenKind::ArrowRight, o));
-            t(i, tag("|->"), |o| push_t(TokenKind::LambdaStart, o));
-            t(i, tag("=>"), |o| push_t(TokenKind::ArrawRightBold, o));
+            t(i, tag("->"), push(TokenKind::ArrowRight));
+            t(i, tag("|->"), push(TokenKind::LambdaStart));
+            t(i, tag("=>"), push(TokenKind::ArrawRightBold));
 
             // Operations
-            t(i, tag("+"), |o| push_t(TokenKind::Plus, o));
-            t(i, tag("-"), |o| push_t(TokenKind::Minus, o));
-            t(i, tag("*"), |o| push_t(TokenKind::Star, o));
-            t(i, tag("/"), |o| push_t(TokenKind::Slash, o));
-            t(i, tag("="), |o| push_t(TokenKind::Equal, o));
+            t(i, tag("+"), push(TokenKind::Plus));
+            t(i, tag("-"), push(TokenKind::Minus));
+            t(i, tag("*"), push(TokenKind::Star));
+            t(i, tag("/"), push(TokenKind::Slash));
+            t(i, tag("="), push(TokenKind::Equal));
 
-            t(i, tag("!"), |o| push_t(TokenKind::ExplanationMark, o));
-            t(i, tag("?"), |o| push_t(TokenKind::QuestionMark, o));
-            t(i, tag(":"), |o| push_t(TokenKind::Colon, o));
-            t(i, tag(","), |o| push_t(TokenKind::Comma, o));
+            t(i, tag("!"), push(TokenKind::ExplanationMark));
+            t(i, tag("?"), push(TokenKind::QuestionMark));
+            t(i, tag(":"), push(TokenKind::Colon));
+            t(i, tag(","), push(TokenKind::Comma));
 
             // Keywords
-            t(i, tag("def"), |o| push_t(TokenKind::Def, o));
-            t(i, tag("as"), |o| push_t(TokenKind::As, o));
+            t(i, tag("def"), push(TokenKind::Def));
+            t(i, tag("as"), push(TokenKind::As));
 
             // Literal
             t(
                 i,
                 (tag("\""), take_till(|c| c == '\"'), tag("\"")),
-                |(_, literal, _)| push_t(TokenKind::Literal, literal),
+                |i, (_, literal, _)| {
+                    let span = Span {
+                        start: i,
+                        end: todo!(),
+                    };
+                },
             );
 
             // Number
@@ -325,25 +336,9 @@ impl Lexer {
     }
 }
 
-const DISPLAY_DATA_PAD: usize = 20;
-impl Display for Lexer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for token in &self.tokens {
-            write!(f, "{:?}", token.kind)?;
-            // TODO: Use custom write impl that counts bytes
-            let length = format!("{:?}", token.kind).len();
-            for _ in 0..(DISPLAY_DATA_PAD - length) {
-                write!(f, " ")?;
-            }
-            writeln!(f, "{}", token.data)?;
-        }
-
-        Ok(())
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Tokens<'a> {
+    source: &'a str,
     buffer: &'a [Token],
     /// Points to the **next** token.
     cursor: usize,
@@ -351,8 +346,9 @@ pub struct Tokens<'a> {
 }
 
 impl<'a> Tokens<'a> {
-    pub fn new(buffer: &'a [Token]) -> Self {
+    pub fn new(source: &'a str, buffer: &'a [Token]) -> Self {
         Self {
+            source,
             buffer,
             cursor: 0,
             range: 0..buffer.len(),
@@ -423,6 +419,23 @@ impl<'a> Iterator for Tokens<'a> {
         let idx = self.cursor;
         self.cursor = (self.cursor + 1).min(self.range.end);
         self.buffer.get(idx)
+    }
+}
+
+const DISPLAY_DATA_PAD: usize = 20;
+impl Display for Tokens<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for token in self.clone() {
+            write!(f, "{:?}", token.kind)?;
+            // TODO: Use custom write impl that counts bytes
+            let length = format!("{:?}", token.kind).len();
+            for _ in 0..(DISPLAY_DATA_PAD - length) {
+                write!(f, " ")?;
+            }
+            writeln!(f, "{}", &self.source[token.span.start..token.span.end])?;
+        }
+
+        Ok(())
     }
 }
 
