@@ -115,16 +115,16 @@ enum BinaryOp {
 }
 
 impl BinaryOp {
-    fn new(kind: TokenKind, span: Span) -> AResult<Self> {
+    fn new(token: Token) -> AResult<Self> {
         use TokenKind::*;
-        let op = match kind {
+        let op = match token.kind {
             Plus => Self::Add,
             Minus => Self::Sub,
             Star => Self::Mul,
             Slash => Self::Div,
             k => {
                 return Err(Error::UnexpectedToken {
-                    found: Token::new(k, span),
+                    found: token,
                     expected: ExpectedTokens::OneOf(&[Plus, Minus, Star, Slash]),
                     expected_msg: None,
                 });
@@ -259,7 +259,9 @@ impl Parse for LiteralExp {
             Some(Token {
                 kind: TokenKind::Literal,
                 span,
-            }) => Ok(Self { literal: data }),
+            }) => Ok(Self {
+                literal: tokens.get_span(span).to_owned(),
+            }),
             Some(t) => Err(Error::UnexpectedToken {
                 found: t,
                 expected: ExpectedTokens::Single(TokenKind::Literal),
@@ -283,9 +285,9 @@ impl Parse for IntegerExpr {
         match tokens.next().cloned() {
             Some(Token {
                 kind: TokenKind::Number,
-                data,
+                span,
             }) => Ok(Self {
-                int: data.parse::<i32>()?,
+                int: tokens.source().parse::<i32>()?,
             }),
             Some(t) => Err(Error::UnexpectedToken {
                 found: t,
@@ -310,8 +312,10 @@ impl Parse for IdentExpr {
         match tokens.next().cloned() {
             Some(Token {
                 kind: TokenKind::Ident,
-                data,
-            }) => Ok(Self { ident: data }),
+                span,
+            }) => Ok(Self {
+                ident: tokens.get_span(span).to_owned(),
+            }),
             Some(t) => Err(Error::UnexpectedToken {
                 found: t,
                 expected: ExpectedTokens::Single(TokenKind::Ident),
@@ -324,20 +328,22 @@ impl Parse for IdentExpr {
 
 pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
     fn eat_atom(tokens: &mut Tokens) -> AResult<Expr> {
-        let Some(Token { kind, data }) = tokens.next() else {
+        let Some(token) = tokens.next() else {
             return Err(Error::Eof);
         };
 
-        let bp_opt = binding_power(*kind).ok();
+        let bp_opt = binding_power(token.kind).ok();
 
         use TokenKind::*;
-        let expr = match kind {
-            Number => Expr::Integer(IntegerExpr { int: data.parse()? }),
+        let expr = match token.kind {
+            Number => Expr::Integer(IntegerExpr {
+                int: tokens.get_span(token.span).to_owned().parse()?,
+            }),
             Ident => Expr::Ident(IdentExpr {
-                ident: data.clone(),
+                ident: tokens.get_span(token.span).to_owned(),
             }),
             Literal => Expr::Literal(LiteralExp {
-                literal: data.clone(),
+                literal: tokens.get_span(token.span).to_owned(),
             }),
             LeftParen => {
                 let lhs = expr(tokens, 0)?;
@@ -351,15 +357,12 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
                 let rhs = expr(tokens, right_bp)?;
                 Expr::Unary(UnaryExpr {
                     item: Box::new(rhs),
-                    op: UnaryOp::try_from(*t)?,
+                    op: UnaryOp::try_from(*token)?,
                 })
             }
             _ => {
                 return Err(Error::UnexpectedToken {
-                    found: Token {
-                        kind: *kind,
-                        data: data.clone(),
-                    },
+                    found: *token,
                     expected: ExpectedTokens::OneOf(&[Number, Ident, Literal]),
                     expected_msg: Some(" or a lambda expression"),
                 });
@@ -372,14 +375,14 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
     let mut lhs = eat_atom(tokens)?;
 
     loop {
-        let Some(Token { kind, data }) = tokens.peek().cloned() else {
+        let Some(token) = tokens.peek().cloned() else {
             break;
         };
-        if kind == Eof {
+        if token.kind == Eof {
             break;
         }
 
-        let bp = binding_power(kind).ok();
+        let bp = binding_power(token.kind).ok();
 
         if let Some((l_bp, r_bp)) = bp.and_then(|bp| bp.infix) {
             if l_bp < min_bp {
@@ -389,7 +392,7 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
             tokens.next();
             let rhs = expr(tokens, r_bp)?;
 
-            if kind == LambdaStart {
+            if token.kind == LambdaStart {
                 let ex = Expr::Lambda(LambdaExpr {
                     args: Box::new(lhs.flatten_sequence()),
                     body: Box::new(rhs),
@@ -401,7 +404,7 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
             let ex = Expr::Binary(BinaryExpr {
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
-                op: BinaryOp::new(kind, &data)?,
+                op: BinaryOp::new(token)?,
             });
             lhs = ex;
 

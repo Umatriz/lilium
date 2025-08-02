@@ -21,7 +21,8 @@ fn main() {
         let content = std::fs::read_to_string(file_path).unwrap();
         println!("File content is:\n--- BEGIN FILE ---\n{content}\n--- END FILE ---");
         let lexer = Lexer::new(&content);
-        println!("Lexed results are:\n{lexer}");
+        let tokens = lexer.tokens();
+        println!("Lexed results are:\n{tokens}");
     }
 
     if let Some(sub) = matches.subcommand_matches("tree") {
@@ -30,7 +31,8 @@ fn main() {
         println!();
 
         let lexer = Lexer::new(code);
-        println!("Lexed results are:\n{lexer}");
+        let tokens = lexer.tokens();
+        println!("Lexed results are:\n{tokens}");
         println!();
 
         let mut expr = expr(&mut lexer.tokens(), 0).unwrap();

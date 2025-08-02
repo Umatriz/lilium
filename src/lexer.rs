@@ -39,13 +39,13 @@ pub enum TokenKind {
     Eof,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
     start: usize,
     end: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Token {
     pub kind: TokenKind,
     pub span: Span,
@@ -199,6 +199,7 @@ macro_rules! impl_combinator {
 variadics_please::all_tuples!(impl_combinator, 0, 16, C, O, c, o);
 
 pub struct Lexer {
+    source: String,
     /// Tokens order is reversed so the `next` and `peek` methods work
     tokens: Vec<Token>,
 }
@@ -207,7 +208,10 @@ impl Lexer {
     pub fn new(source: &str) -> Self {
         let tokens = Self::parse_tokens(source);
         // tokens.reverse();
-        Self { tokens }
+        Self {
+            source: source.to_string(),
+            tokens,
+        }
     }
 
     pub fn parse_tokens(source: &str) -> Vec<Token> {
@@ -242,11 +246,8 @@ impl Lexer {
                 end: start + data.len(),
             }
         };
-        let mut push = |kind| {
-            |rest: &str, data: &str| {
-                let span = make_span(rest, data);
-                tokens.push(Token::new(kind, span));
-            }
+        let mut push = |kind, span| {
+            tokens.push(Token::new(kind, span));
         };
 
         let mut inp = source;
@@ -263,49 +264,71 @@ impl Lexer {
             t(i, many1(tag("\r")), skip);
 
             // Delimiters
-            t(i, tag("("), push(TokenKind::LeftParen));
-            t(i, tag(")"), push(TokenKind::RightParen));
-            t(i, tag("["), push(TokenKind::LeftBracket));
-            t(i, tag("]"), push(TokenKind::RightBracket));
-            t(i, tag("{"), push(TokenKind::LeftBrace));
-            t(i, tag("}"), push(TokenKind::RightBrace));
+            t(i, tag("("), |r, o| {
+                push(TokenKind::LeftParen, make_span(r, o))
+            });
+            t(i, tag(")"), |r, o| {
+                push(TokenKind::RightParen, make_span(r, o))
+            });
+            t(i, tag("["), |r, o| {
+                push(TokenKind::LeftBracket, make_span(r, o))
+            });
+            t(i, tag("]"), |r, o| {
+                push(TokenKind::RightBracket, make_span(r, o))
+            });
+            t(i, tag("{"), |r, o| {
+                push(TokenKind::LeftBrace, make_span(r, o))
+            });
+            t(i, tag("}"), |r, o| {
+                push(TokenKind::RightBrace, make_span(r, o))
+            });
 
             // Arrows
-            t(i, tag("->"), push(TokenKind::ArrowRight));
-            t(i, tag("|->"), push(TokenKind::LambdaStart));
-            t(i, tag("=>"), push(TokenKind::ArrawRightBold));
+            t(i, tag("->"), |r, o| {
+                push(TokenKind::ArrowRight, make_span(r, o))
+            });
+            t(i, tag("|->"), |r, o| {
+                push(TokenKind::LambdaStart, make_span(r, o))
+            });
+            t(i, tag("=>"), |r, o| {
+                push(TokenKind::ArrawRightBold, make_span(r, o))
+            });
 
             // Operations
-            t(i, tag("+"), push(TokenKind::Plus));
-            t(i, tag("-"), push(TokenKind::Minus));
-            t(i, tag("*"), push(TokenKind::Star));
-            t(i, tag("/"), push(TokenKind::Slash));
-            t(i, tag("="), push(TokenKind::Equal));
+            t(i, tag("+"), |r, o| push(TokenKind::Plus, make_span(r, o)));
+            t(i, tag("-"), |r, o| push(TokenKind::Minus, make_span(r, o)));
+            t(i, tag("*"), |r, o| push(TokenKind::Star, make_span(r, o)));
+            t(i, tag("/"), |r, o| push(TokenKind::Slash, make_span(r, o)));
+            t(i, tag("="), |r, o| push(TokenKind::Equal, make_span(r, o)));
 
-            t(i, tag("!"), push(TokenKind::ExplanationMark));
-            t(i, tag("?"), push(TokenKind::QuestionMark));
-            t(i, tag(":"), push(TokenKind::Colon));
-            t(i, tag(","), push(TokenKind::Comma));
+            t(i, tag("!"), |r, o| {
+                push(TokenKind::ExplanationMark, make_span(r, o))
+            });
+            t(i, tag("?"), |r, o| {
+                push(TokenKind::QuestionMark, make_span(r, o))
+            });
+            t(i, tag(":"), |r, o| push(TokenKind::Colon, make_span(r, o)));
+            t(i, tag(","), |r, o| push(TokenKind::Comma, make_span(r, o)));
 
             // Keywords
-            t(i, tag("def"), push(TokenKind::Def));
-            t(i, tag("as"), push(TokenKind::As));
+            t(i, tag("def"), |r, o| push(TokenKind::Def, make_span(r, o)));
+            t(i, tag("as"), |r, o| push(TokenKind::As, make_span(r, o)));
 
             // Literal
             t(
                 i,
                 (tag("\""), take_till(|c| c == '\"'), tag("\"")),
-                |i, (_, literal, _)| {
-                    let span = Span {
-                        start: i,
-                        end: todo!(),
-                    };
+                |r, (_, literal, _)| {
+                    let mut span = make_span(r, literal);
+                    span.start -= 1;
+                    span.end += 1;
+                    push(TokenKind::Literal, span);
                 },
             );
 
             // Number
-            t(i, take_while1(|c| c.is_ascii_digit()), |o| {
-                push_t(TokenKind::Number, o)
+            t(i, take_while1(|c| c.is_ascii_digit()), |r, o| {
+                push(TokenKind::Number, make_span(r, o))
             });
 
             // Identifier
@@ -316,11 +339,11 @@ impl Lexer {
                     take_while1(|c| c.is_ascii_alphabetic()),
                     take_while(|c| c.is_ascii_alphanumeric()),
                 ),
-                |(first, second)| {
+                |r, (first, second)| {
                     let mut s = String::new();
                     s.push_str(first);
                     s.push_str(second);
-                    push_t(TokenKind::Ident, &s);
+                    push(TokenKind::Ident, make_span(r, &s));
                 },
             );
 
@@ -332,7 +355,7 @@ impl Lexer {
     }
 
     pub fn tokens(&self) -> Tokens<'_> {
-        Tokens::new(&self.tokens)
+        Tokens::new(&self.source, &self.tokens)
     }
 }
 
@@ -355,9 +378,18 @@ impl<'a> Tokens<'a> {
         }
     }
 
+    pub fn source(&self) -> &str {
+        self.source
+    }
+
+    pub fn get_span(&self, span: Span) -> &str {
+        &self.source()[span.start..span.end]
+    }
+
     /// Take an idependent iterator over a region bounded by `range`.
     pub fn region(&self, range: Range<usize>) -> Tokens<'a> {
         Tokens {
+            source: &self.source,
             buffer: &self.buffer,
             cursor: range.start,
             range,
