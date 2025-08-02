@@ -45,6 +45,16 @@ pub struct Span {
     end: usize,
 }
 
+impl Span {
+    pub fn concat(self, other: Self) -> Self {
+        assert_eq!(self.end, other.start);
+        Self {
+            start: self.start,
+            end: other.end,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Token {
     pub kind: TokenKind,
@@ -239,13 +249,16 @@ impl Lexer {
         // };
 
         let initial_len = source.len();
-        let make_span = |rest: &str, data: &str| {
-            let start = initial_len - rest.len();
+        let make_span_lens = |rest: usize, data: usize| {
+            let end = initial_len - rest;
             Span {
-                start,
-                end: start + data.len(),
+                start: end - data,
+                end,
             }
         };
+
+        let make_span = |rest: &str, data: &str| make_span_lens(rest.len(), data.len());
+
         let mut push = |kind, span| {
             tokens.push(Token::new(kind, span));
         };
@@ -319,9 +332,7 @@ impl Lexer {
                 i,
                 (tag("\""), take_till(|c| c == '\"'), tag("\"")),
                 |r, (_, literal, _)| {
-                    let mut span = make_span(r, literal);
-                    span.start -= 1;
-                    span.end += 1;
+                    let span = make_span_lens(r.len(), literal.len() + 2);
                     push(TokenKind::Literal, span);
                 },
             );

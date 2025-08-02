@@ -7,4 +7,4 @@ as
     a = 30
     b = double 16
     c = add a b
-    println f"{c}"
+    println f"{c}" 5 3

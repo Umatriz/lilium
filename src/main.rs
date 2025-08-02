@@ -19,10 +19,10 @@ fn main() {
     if let Some(sub) = matches.subcommand_matches("lex") {
         let file_path = sub.get_one::<PathBuf>("file").unwrap();
         let content = std::fs::read_to_string(file_path).unwrap();
-        println!("File content is:\n--- BEGIN FILE ---\n{content}\n--- END FILE ---");
+        println!("--- BEGIN FILE ---\n{content}\n--- END FILE ---");
         let lexer = Lexer::new(&content);
         let tokens = lexer.tokens();
-        println!("Lexed results are:\n{tokens}");
+        println!("--- BIGIN LEXING RESULTS ---\n{tokens}\n--- END LEXING RESULTS ---");
     }
 
     if let Some(sub) = matches.subcommand_matches("tree") {
