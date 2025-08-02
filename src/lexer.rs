@@ -481,7 +481,8 @@ mod tests {
         println!("o={o:#?}");
 
         let lexer = Lexer::new("a  + b *\"literal!!\"");
-        println!("lexer:\n{lexer}");
+        let tokens = lexer.tokens();
+        println!("tokens:\n{tokens}");
     }
 
     #[test]

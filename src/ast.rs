@@ -1,6 +1,6 @@
 use std::{borrow::Cow, fmt::Display, num::ParseIntError};
 
-use crate::lexer::{Span, Token, TokenKind, Tokens};
+use crate::lexer::{Token, TokenKind, Tokens};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -101,13 +101,13 @@ impl Expr {
 
 #[derive(Debug)]
 pub struct BinaryExpr {
-    lhs: Box<Expr>,
-    rhs: Box<Expr>,
-    op: BinaryOp,
+    pub lhs: Box<Expr>,
+    pub rhs: Box<Expr>,
+    pub op: BinaryOp,
 }
 
 #[derive(Debug)]
-enum BinaryOp {
+pub enum BinaryOp {
     Add,
     Sub,
     Mul,
@@ -122,7 +122,7 @@ impl BinaryOp {
             Minus => Self::Sub,
             Star => Self::Mul,
             Slash => Self::Div,
-            k => {
+            _ => {
                 return Err(Error::UnexpectedToken {
                     found: token,
                     expected: ExpectedTokens::OneOf(&[Plus, Minus, Star, Slash]),
@@ -137,12 +137,12 @@ impl BinaryOp {
 
 #[derive(Debug)]
 pub struct UnaryExpr {
-    item: Box<Expr>,
-    op: UnaryOp,
+    pub item: Box<Expr>,
+    pub op: UnaryOp,
 }
 
 #[derive(Debug)]
-enum UnaryOp {
+pub enum UnaryOp {
     // TODO: Maybe change the name...
     MarkPositive,
     Negate,
@@ -155,7 +155,7 @@ impl TryFrom<Token> for UnaryOp {
         let op = match value.kind {
             TokenKind::Plus => UnaryOp::MarkPositive,
             TokenKind::Minus => UnaryOp::Negate,
-            t => {
+            _ => {
                 return Err(Error::UnexpectedToken {
                     found: value,
                     expected: ExpectedTokens::OneOf(&[TokenKind::Plus, TokenKind::Minus]),
@@ -170,8 +170,8 @@ impl TryFrom<Token> for UnaryOp {
 
 #[derive(Debug)]
 pub struct LambdaExpr {
-    args: Box<Expr>,
-    body: Box<Expr>,
+    pub args: Box<Expr>,
+    pub body: Box<Expr>,
 }
 
 // impl Parse for LambdaExpr {
@@ -247,7 +247,7 @@ pub struct LambdaExpr {
 #[derive(Debug)]
 pub struct LiteralExp {
     // TODO: Maybe use &'a str
-    literal: String,
+    pub literal: String,
 }
 
 impl Parse for LiteralExp {
@@ -274,7 +274,7 @@ impl Parse for LiteralExp {
 
 #[derive(Debug)]
 pub struct IntegerExpr {
-    int: i32,
+    pub int: i32,
 }
 
 impl Parse for IntegerExpr {
@@ -287,7 +287,7 @@ impl Parse for IntegerExpr {
                 kind: TokenKind::Number,
                 span,
             }) => Ok(Self {
-                int: tokens.source().parse::<i32>()?,
+                int: tokens.get_span(span).parse::<i32>()?,
             }),
             Some(t) => Err(Error::UnexpectedToken {
                 found: t,
@@ -301,7 +301,7 @@ impl Parse for IntegerExpr {
 
 #[derive(Debug)]
 pub struct IdentExpr {
-    ident: String,
+    pub ident: String,
 }
 
 impl Parse for IdentExpr {
@@ -350,7 +350,7 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
                 assert!(tokens.next().is_some_and(|t| t.is(RightParen)));
                 lhs
             }
-            t if bp_opt.is_some_and(|bp| bp.prefix.is_some()) => {
+            _ if bp_opt.is_some_and(|bp| bp.prefix.is_some()) => {
                 // PANICS: We can unwrap here because the statement is
                 // unreachable unless it's `Some`.
                 let right_bp = bp_opt.and_then(|bp| bp.prefix).unwrap();
@@ -469,10 +469,6 @@ impl BindingPower {
     fn postfix(mut self, power: u8) -> Self {
         self.postfix = Some(power);
         self
-    }
-
-    fn is_any(&self) -> bool {
-        self.prefix.is_some() || self.infix.is_some() || self.postfix.is_some()
     }
 }
 
