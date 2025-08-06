@@ -355,12 +355,12 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
         }
 
         // if bp.is_none() {
-        //     // All previous varians have failed which means it's a sequece
+        //     // All previous variants have failed which means it's a sequence
         //     let rhs = dbg!(expr(tokens, 0))?;
-        //     let sequece = Sequence {
+        //     let sequence = Sequence {
         //         seq: vec![lhs, rhs],
         //     };
-        //     lhs = Expr::Sequence(sequece);
+        //     lhs = Expr::Sequence(sequence);
 
         //     continue;
         // }
@@ -420,8 +420,8 @@ pub struct Sequence<T> {
 }
 
 impl<T: Parse> Sequence<T> {
-    /// Elements must be seprated by the `separator` token.
-    /// Parsing will be stoped when `stop` token is met. Stop-token will **not** be consumed.
+    /// Elements must be separated by the `separator` token.
+    /// Parsing will be stopped when `stop` token is met. Stop-token will **not** be consumed.
     pub fn parse_till(
         tokens: &mut Tokens,
         stop: &Token,

@@ -1,7 +1,11 @@
-use std::{fmt::Display, ops::Range};
+use std::{fmt::Display, marker::PhantomData, ops::Range};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
+    /// Special kind of token that is used by the scanner when a token
+    /// should be ignored.
+    None,
+
     Plus,
     Minus,
     Star,
@@ -208,6 +212,81 @@ macro_rules! impl_combinator {
 
 variadics_please::all_tuples!(impl_combinator, 0, 16, C, O, c, o);
 
+#[derive(Debug, Default)]
+pub struct Scanner<C, P, H, I, O, L> {
+    matched: bool,
+    context: C,
+    input_extractor: P,
+    handler: H,
+    _markers: PhantomData<(I, O, L)>,
+}
+
+impl<C, P, H, I, O, L> Scanner<C, P, H, I, O, L>
+where
+    P: FnMut(&C) -> I,
+    H: FnMut(&mut C, L, I, O),
+{
+    pub fn new(context: C, extractor: P, handler: H) -> Self {
+        Self {
+            matched: false,
+            context,
+            input_extractor: extractor,
+            handler,
+            _markers: PhantomData,
+        }
+    }
+
+    pub fn set_context(&mut self, context: C) {
+        self.context = context
+    }
+
+    pub fn set_extractor(&mut self, extractor: P) {
+        self.input_extractor = extractor
+    }
+
+    pub fn set_handler(&mut self, handler: H) {
+        self.handler = handler
+    }
+
+    pub fn scan(&mut self, mut combinator: impl Combinator<I, Output = O>, local_context: L) {
+        if self.matched {
+            return;
+        }
+
+        let input = (self.input_extractor)(&self.context);
+        let matched = match combinator.process(input) {
+            Some((i, o)) => {
+                (self.handler)(&mut self.context, local_context, i, o);
+                true
+            }
+            None => false,
+        };
+
+        self.matched = matched;
+    }
+
+    /// Returns the current value of `matched` and sets it to `false`
+    pub fn take_matched(&mut self) -> bool {
+        let matched = self.matched;
+        self.matched = false;
+        matched
+    }
+}
+
+impl<C, P, H, I, O, L> Scanner<C, P, H, I, O, L>
+where
+    P: FnMut(&C) -> I,
+{
+    /// Scan but with a custom handler.
+    pub fn scan_special<I1, O1, L1, F>(&mut self, mut combinator: impl Combinator<I1, Output = O1>)
+    where
+        F: FnOnce(&mut C, L1, I1, O1),
+    {
+    }
+
+    fn scan_explicit(&mut self) {}
+}
+
 pub struct Lexer {
     source: String,
     /// Tokens order is reversed so the `next` and `peek` methods work
@@ -224,29 +303,15 @@ impl Lexer {
         }
     }
 
+    // FIXME: Enters infinite loop if an unsoported token is met
     pub fn parse_tokens(source: &str) -> Vec<Token> {
-        /// Returns `true` if the parse was successful and `false` if not.
-        fn t<I: Copy, O>(
-            inp: &mut I,
-            mut combinator: impl Combinator<I, Output = O>,
-            fun: impl FnOnce(I, O),
-        ) -> bool {
-            if let Some((i, out)) = combinator.process(*inp) {
-                *inp = i;
-                fun(i, out);
-                true
-            } else {
-                false
-            }
+        enum Action {
+            Skip,
+            Push,
         }
-
-        fn skip<I, O>(_: I, _: O) {}
+        use Action::*;
 
         let mut tokens = Vec::new();
-
-        // let mut push_t = |kind, data: &str| {
-        //     tokens.push(Token::new(kind, data));
-        // };
 
         let initial_len = source.len();
         let make_span_lens = |rest: usize, data: usize| {
@@ -259,42 +324,37 @@ impl Lexer {
 
         let make_span = |rest: &str, data: &str| make_span_lens(rest.len(), data.len());
 
-        let mut push = |kind, span| {
-            tokens.push(Token::new(kind, span));
-        };
-
         let mut inp = source;
-        let i = &mut inp;
 
-        while !i.is_empty() {
+        let mut scanner = Scanner::new(
+            (&mut inp, &mut tokens),
+            |ctx| *ctx.0,
+            |ctx, (kind, action), i, o| match action {
+                Skip => {}
+                Push => {
+                    let span = make_span(i, o);
+                    ctx.1.push(Token::new(kind, span));
+                }
+            },
+        );
+
+        while !inp.is_empty() {
             // Tabs and whitespaces
-            t(i, take_while(|c| c == ' '), skip);
-            t(i, take_while(|c| c == '\t'), skip);
+            scanner.scan(take_while(|c| c == ' '), (TokenKind::None, Skip));
+            scanner.scan(take_while(|c| c == '\t'), (TokenKind::None, Skip));
 
             // Newlines
-            t(i, many1(tag("\r\n")), skip);
-            t(i, many1(tag("\n")), skip);
-            t(i, many1(tag("\r")), skip);
+            scanner.scan(many1(tag("\r\n")), (TokenKind::NewLine, Skip));
+            scanner.scan(many1(tag("\n")), (TokenKind::NewLine, Skip));
+            scanner.scan(many1(tag("\r")), (TokenKind::NewLine, Skip));
 
             // Delimiters
-            t(i, tag("("), |r, o| {
-                push(TokenKind::LeftParen, make_span(r, o))
-            });
-            t(i, tag(")"), |r, o| {
-                push(TokenKind::RightParen, make_span(r, o))
-            });
-            t(i, tag("["), |r, o| {
-                push(TokenKind::LeftBracket, make_span(r, o))
-            });
-            t(i, tag("]"), |r, o| {
-                push(TokenKind::RightBracket, make_span(r, o))
-            });
-            t(i, tag("{"), |r, o| {
-                push(TokenKind::LeftBrace, make_span(r, o))
-            });
-            t(i, tag("}"), |r, o| {
-                push(TokenKind::RightBrace, make_span(r, o))
-            });
+            scanner.scan(tag("("),;
+            scanner.scan(tag(")"),;
+            scanner.scan(tag("["),;
+            scanner.scan(tag("]"),;
+            scanner.scan(tag("{"),;
+            scanner.scan(tag("}"),;
 
             // Arrows
             t(i, tag("->"), |r, o| {
