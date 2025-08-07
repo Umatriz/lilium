@@ -221,6 +221,33 @@ pub struct Scanner<C, P, H, I, O, L> {
     _markers: PhantomData<(I, O, L)>,
 }
 
+fn scan_explicit<C, P, H, L, I, O>(
+    matched: &mut bool,
+    context: &mut C,
+    input_extractor: &mut P,
+    handler: H,
+    local_context: L,
+    mut combinator: impl Combinator<I, Output = O>,
+) where
+    P: FnMut(&C) -> I,
+    H: FnOnce(&mut C, L, I, O),
+{
+    if *matched {
+        return;
+    }
+
+    let input = (input_extractor)(&context);
+    let is_matched = match combinator.process(input) {
+        Some((i, o)) => {
+            (handler)(context, local_context, i, o);
+            true
+        }
+        None => false,
+    };
+
+    *matched = is_matched;
+}
+
 impl<C, P, H, I, O, L> Scanner<C, P, H, I, O, L>
 where
     P: FnMut(&C) -> I,
@@ -236,33 +263,15 @@ where
         }
     }
 
-    pub fn set_context(&mut self, context: C) {
-        self.context = context
-    }
-
-    pub fn set_extractor(&mut self, extractor: P) {
-        self.input_extractor = extractor
-    }
-
-    pub fn set_handler(&mut self, handler: H) {
-        self.handler = handler
-    }
-
-    pub fn scan(&mut self, mut combinator: impl Combinator<I, Output = O>, local_context: L) {
-        if self.matched {
-            return;
-        }
-
-        let input = (self.input_extractor)(&self.context);
-        let matched = match combinator.process(input) {
-            Some((i, o)) => {
-                (self.handler)(&mut self.context, local_context, i, o);
-                true
-            }
-            None => false,
-        };
-
-        self.matched = matched;
+    pub fn scan(&mut self, combinator: impl Combinator<I, Output = O>, local_context: L) {
+        scan_explicit(
+            &mut self.matched,
+            &mut self.context,
+            &mut self.input_extractor,
+            &mut self.handler,
+            local_context,
+            combinator,
+        );
     }
 
     /// Returns the current value of `matched` and sets it to `false`
@@ -278,13 +287,23 @@ where
     P: FnMut(&C) -> I,
 {
     /// Scan but with a custom handler.
-    pub fn scan_special<I1, O1, L1, F>(&mut self, mut combinator: impl Combinator<I1, Output = O1>)
-    where
-        F: FnOnce(&mut C, L1, I1, O1),
+    pub fn scan_special<O1, L1, H1>(
+        &mut self,
+        combinator: impl Combinator<I, Output = O1>,
+        local_context: L1,
+        handler: H1,
+    ) where
+        H1: FnOnce(&mut C, L1, I, O1),
     {
+        scan_explicit(
+            &mut self.matched,
+            &mut self.context,
+            &mut self.input_extractor,
+            handler,
+            local_context,
+            combinator,
+        );
     }
-
-    fn scan_explicit(&mut self) {}
 }
 
 pub struct Lexer {
@@ -338,23 +357,25 @@ impl Lexer {
             },
         );
 
+        let skip_handler = |_ctx, (), _i, _o| {};
+
         while !inp.is_empty() {
             // Tabs and whitespaces
             scanner.scan(take_while(|c| c == ' '), (TokenKind::None, Skip));
             scanner.scan(take_while(|c| c == '\t'), (TokenKind::None, Skip));
 
             // Newlines
-            scanner.scan(many1(tag("\r\n")), (TokenKind::NewLine, Skip));
-            scanner.scan(many1(tag("\n")), (TokenKind::NewLine, Skip));
-            scanner.scan(many1(tag("\r")), (TokenKind::NewLine, Skip));
+            scanner.scan_special(many1(tag("\r\n")), (), skip_handler);
+            scanner.scan_special(many1(tag("\n")), (), skip_handler);
+            scanner.scan_special(many1(tag("\r")), (), skip_handler);
 
             // Delimiters
-            scanner.scan(tag("("),;
-            scanner.scan(tag(")"),;
-            scanner.scan(tag("["),;
-            scanner.scan(tag("]"),;
-            scanner.scan(tag("{"),;
-            scanner.scan(tag("}"),;
+            scanner.scan(tag("("), (TokenKind::LeftParen, Push));
+            scanner.scan(tag(")"), (TokenKind::RightParen, Push));
+            scanner.scan(tag("["), (TokenKind::LeftBracket, Push));
+            scanner.scan(tag("]"), (TokenKind::RightBracket, Push));
+            scanner.scan(tag("{"), (TokenKind::LeftBrace, Push));
+            scanner.scan(tag("}"), (TokenKind::RightBrace, Push));
 
             // Arrows
             t(i, tag("->"), |r, o| {
