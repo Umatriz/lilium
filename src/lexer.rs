@@ -369,6 +369,13 @@ impl Lexer {
             scanner.scan_special(many1(tag("\n")), (), skip_handler);
             scanner.scan_special(many1(tag("\r")), (), skip_handler);
 
+            // Comment
+            scanner.scan_special(
+                (tag("//"), take_till(|c| c == '\n' || c == '\r')),
+                (),
+                |_ctx, (), _i, _o| {},
+            );
+
             // Delimiters
             scanner.scan(tag("("), (TokenKind::LeftParen, Push));
             scanner.scan(tag(")"), (TokenKind::RightParen, Push));
@@ -378,69 +385,57 @@ impl Lexer {
             scanner.scan(tag("}"), (TokenKind::RightBrace, Push));
 
             // Arrows
-            t(i, tag("->"), |r, o| {
-                push(TokenKind::ArrowRight, make_span(r, o))
-            });
-            t(i, tag("|->"), |r, o| {
-                push(TokenKind::LambdaStart, make_span(r, o))
-            });
-            t(i, tag("=>"), |r, o| {
-                push(TokenKind::ArrawRightBold, make_span(r, o))
-            });
+            scanner.scan(tag("->"), (TokenKind::ArrowRight, Push));
+            scanner.scan(tag("|->"), (TokenKind::LambdaStart, Push));
+            scanner.scan(tag("=>"), (TokenKind::ArrawRightBold, Push));
 
             // Operations
-            t(i, tag("+"), |r, o| push(TokenKind::Plus, make_span(r, o)));
-            t(i, tag("-"), |r, o| push(TokenKind::Minus, make_span(r, o)));
-            t(i, tag("*"), |r, o| push(TokenKind::Star, make_span(r, o)));
-            t(i, tag("/"), |r, o| push(TokenKind::Slash, make_span(r, o)));
-            t(i, tag("="), |r, o| push(TokenKind::Equal, make_span(r, o)));
+            scanner.scan(tag("+"), (TokenKind::Plus, Push));
+            scanner.scan(tag("-"), (TokenKind::Minus, Push));
+            scanner.scan(tag("*"), (TokenKind::Star, Push));
+            // TODO: This overlaps with the `//` comments
+            scanner.scan(tag("/"), (TokenKind::Slash, Push));
+            scanner.scan(tag("="), (TokenKind::Equal, Push));
 
-            t(i, tag("!"), |r, o| {
-                push(TokenKind::ExplanationMark, make_span(r, o))
-            });
-            t(i, tag("?"), |r, o| {
-                push(TokenKind::QuestionMark, make_span(r, o))
-            });
-            t(i, tag(":"), |r, o| push(TokenKind::Colon, make_span(r, o)));
-            t(i, tag(","), |r, o| push(TokenKind::Comma, make_span(r, o)));
+            scanner.scan(tag("!"), (TokenKind::ExplanationMark, Push));
+            scanner.scan(tag("?"), (TokenKind::QuestionMark, Push));
+            scanner.scan(tag(":"), (TokenKind::Colon, Push));
+            scanner.scan(tag(","), (TokenKind::Comma, Push));
 
             // Keywords
-            t(i, tag("def"), |r, o| push(TokenKind::Def, make_span(r, o)));
-            t(i, tag("as"), |r, o| push(TokenKind::As, make_span(r, o)));
+            scanner.scan(tag("def"), (TokenKind::Def, Push));
+            scanner.scan(tag("as"), (TokenKind::As, Push));
 
             // Literal
-            t(
-                i,
+            scanner.scan_special(
                 (tag("\""), take_till(|c| c == '\"'), tag("\"")),
-                |r, (_, literal, _)| {
-                    let span = make_span_lens(r.len(), literal.len() + 2);
-                    push(TokenKind::Literal, span);
+                (),
+                |ctx, (), i, (_, literal, _)| {
+                    let span = make_span_lens(i.len(), literal.len() + 2);
+                    ctx.1.push(Token::new(TokenKind::Literal, span));
                 },
             );
 
             // Number
-            t(i, take_while1(|c| c.is_ascii_digit()), |r, o| {
-                push(TokenKind::Number, make_span(r, o))
-            });
+            scanner.scan(
+                take_while1(|c| c.is_ascii_digit()),
+                (TokenKind::Number, Push),
+            );
 
             // Identifier
-            t(
-                i,
+            scanner.scan_special(
                 (
                     // Idents can't start from numbers so we use two `take_while`s
                     take_while1(|c| c.is_ascii_alphabetic()),
                     take_while(|c| c.is_ascii_alphanumeric()),
                 ),
-                |r, (first, second)| {
-                    let mut s = String::new();
-                    s.push_str(first);
-                    s.push_str(second);
-                    push(TokenKind::Ident, make_span(r, &s));
+                (),
+                |ctx, (), i, (first, second)| {
+                    let len = first.len() + second.len();
+                    ctx.1
+                        .push(Token::new(TokenKind::Ident, make_span_lens(i, len)));
                 },
             );
-
-            // Comment
-            t(i, (tag("//"), take_till(|c| c == '\n' || c == '\r')), skip);
         }
 
         tokens
