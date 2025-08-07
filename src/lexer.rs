@@ -436,6 +436,10 @@ impl Lexer {
                         .push(Token::new(TokenKind::Ident, make_span_lens(i, len)));
                 },
             );
+
+            if scanner.take_matched() {
+                todo!();
+            }
         }
 
         tokens
