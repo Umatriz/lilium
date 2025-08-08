@@ -20,7 +20,7 @@ fn main() {
         let file_path = sub.get_one::<PathBuf>("file").unwrap();
         let content = std::fs::read_to_string(file_path).unwrap();
         println!("--- BEGIN FILE ---\n{content}\n--- END FILE ---");
-        let lexer = Lexer::new(&content);
+        let lexer = Lexer::new(&content).unwrap();
         let tokens = lexer.tokens();
         println!("--- BIGIN LEXING RESULTS ---\n{tokens}\n--- END LEXING RESULTS ---");
     }
@@ -30,7 +30,7 @@ fn main() {
         println!("{code}");
         println!();
 
-        let lexer = Lexer::new(code);
+        let lexer = Lexer::new(code).unwrap();
         let tokens = lexer.tokens();
         println!("Lexed results are:\n{tokens}");
         println!();

@@ -1,5 +1,7 @@
 use std::{fmt::Display, marker::PhantomData, ops::Range};
 
+use thiserror::Error;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
     /// Special kind of token that is used by the scanner when a token
@@ -236,7 +238,7 @@ fn scan_explicit<'a, C, P, H, L, I, O>(
         return;
     }
 
-    let input = (input_extractor)(&context);
+    let input = (input_extractor)(context);
     let is_matched = match combinator.process(input) {
         Some((i, o)) => {
             (handler)(context, local_context, i, o);
@@ -245,7 +247,9 @@ fn scan_explicit<'a, C, P, H, L, I, O>(
         None => false,
     };
 
-    *matched = is_matched;
+    if is_matched {
+        *matched = true;
+    }
 }
 
 impl<C, P, H, I, O, L> Scanner<C, P, H, I, O, L>
@@ -310,6 +314,12 @@ where
     }
 }
 
+#[derive(Debug, Error)]
+pub enum LexerError {
+    #[error("Unsuported symbol encountered")]
+    UnsupportedSymbol(Span),
+}
+
 pub struct Lexer {
     source: String,
     /// Tokens order is reversed so the `next` and `peek` methods work
@@ -317,17 +327,17 @@ pub struct Lexer {
 }
 
 impl Lexer {
-    pub fn new(source: &str) -> Self {
+    pub fn new(source: &str) -> Result<Self, LexerError> {
         let tokens = Self::parse_tokens(source);
         // tokens.reverse();
-        Self {
+        Ok(Self {
             source: source.to_string(),
-            tokens,
-        }
+            tokens: tokens?,
+        })
     }
 
     // FIXME: Enters infinite loop if an unsoported token is met
-    pub fn parse_tokens(source: &str) -> Vec<Token> {
+    pub fn parse_tokens(source: &str) -> Result<Vec<Token>, LexerError> {
         enum Action {
             Skip,
             Push,
@@ -365,8 +375,8 @@ impl Lexer {
 
         while !scanner.input().is_empty() {
             // Tabs and whitespaces
-            scanner.scan(take_while(|c| c == ' '), (TokenKind::None, Skip));
-            scanner.scan(take_while(|c| c == '\t'), (TokenKind::None, Skip));
+            scanner.scan(take_while1(|c| c == ' '), (TokenKind::None, Skip));
+            scanner.scan(take_while1(|c| c == '\t'), (TokenKind::None, Skip));
 
             // Newlines
             scanner.scan_special(many1(tag("\r\n")), (), skip_handler);
@@ -440,12 +450,12 @@ impl Lexer {
                 },
             );
 
-            if scanner.take_matched() {
-                todo!();
+            if !scanner.take_matched() {
+                return Err(LexerError::UnsupportedSymbol(Span { start: 0, end: 1 }));
             }
         }
 
-        tokens
+        Ok(tokens)
     }
 
     pub fn tokens(&self) -> Tokens<'_> {
@@ -483,8 +493,8 @@ impl<'a> Tokens<'a> {
     /// Take an idependent iterator over a region bounded by `range`.
     pub fn region(&self, range: Range<usize>) -> Tokens<'a> {
         Tokens {
-            source: &self.source,
-            buffer: &self.buffer,
+            source: self.source,
+            buffer: self.buffer,
             cursor: range.start,
             range,
         }
