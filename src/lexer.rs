@@ -221,16 +221,16 @@ pub struct Scanner<C, P, H, I, O, L> {
     _markers: PhantomData<(I, O, L)>,
 }
 
-fn scan_explicit<C, P, H, L, I, O>(
+fn scan_explicit<'a, C, P, H, L, I, O>(
     matched: &mut bool,
-    context: &mut C,
+    context: &'a mut C,
     input_extractor: &mut P,
     handler: H,
     local_context: L,
     mut combinator: impl Combinator<I, Output = O>,
 ) where
-    P: FnMut(&C) -> I,
-    H: FnOnce(&mut C, L, I, O),
+    P: Fn(&C) -> I,
+    H: FnOnce(&'a mut C, L, I, O),
 {
     if *matched {
         return;
@@ -250,7 +250,7 @@ fn scan_explicit<C, P, H, L, I, O>(
 
 impl<C, P, H, I, O, L> Scanner<C, P, H, I, O, L>
 where
-    P: FnMut(&C) -> I,
+    P: Fn(&C) -> I,
     H: FnMut(&mut C, L, I, O),
 {
     pub fn new(context: C, extractor: P, handler: H) -> Self {
@@ -284,16 +284,20 @@ where
 
 impl<C, P, H, I, O, L> Scanner<C, P, H, I, O, L>
 where
-    P: FnMut(&C) -> I,
+    P: Fn(&C) -> I,
 {
+    pub fn input(&self) -> I {
+        (self.input_extractor)(&self.context)
+    }
+
     /// Scan but with a custom handler.
-    pub fn scan_special<O1, L1, H1>(
-        &mut self,
+    pub fn scan_special<'a, O1, L1, H1>(
+        &'a mut self,
         combinator: impl Combinator<I, Output = O1>,
         local_context: L1,
         handler: H1,
     ) where
-        H1: FnOnce(&mut C, L1, I, O1),
+        H1: FnOnce(&'a mut C, L1, I, O1),
     {
         scan_explicit(
             &mut self.matched,
@@ -357,9 +361,9 @@ impl Lexer {
             },
         );
 
-        let skip_handler = |_ctx, (), _i, _o| {};
+        fn skip_handler<C, L, I, O>(_ctx: C, _local: L, _i: I, _o: O) {}
 
-        while !inp.is_empty() {
+        while !scanner.input().is_empty() {
             // Tabs and whitespaces
             scanner.scan(take_while(|c| c == ' '), (TokenKind::None, Skip));
             scanner.scan(take_while(|c| c == '\t'), (TokenKind::None, Skip));
@@ -393,7 +397,6 @@ impl Lexer {
             scanner.scan(tag("+"), (TokenKind::Plus, Push));
             scanner.scan(tag("-"), (TokenKind::Minus, Push));
             scanner.scan(tag("*"), (TokenKind::Star, Push));
-            // TODO: This overlaps with the `//` comments
             scanner.scan(tag("/"), (TokenKind::Slash, Push));
             scanner.scan(tag("="), (TokenKind::Equal, Push));
 
@@ -433,7 +436,7 @@ impl Lexer {
                 |ctx, (), i, (first, second)| {
                     let len = first.len() + second.len();
                     ctx.1
-                        .push(Token::new(TokenKind::Ident, make_span_lens(i, len)));
+                        .push(Token::new(TokenKind::Ident, make_span_lens(i.len(), len)));
                 },
             );
 

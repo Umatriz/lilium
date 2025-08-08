@@ -126,7 +126,7 @@ impl BinaryOp {
                 return Err(Error::UnexpectedToken {
                     found: token,
                     expected: ExpectedTokens::OneOf(&[Plus, Minus, Star, Slash]),
-                    expected_msg: None,
+                    expected_msg: Option::None,
                 });
             }
         };
