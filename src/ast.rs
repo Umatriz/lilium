@@ -29,6 +29,24 @@ pub enum ExpectedTokens {
     OneOf(&'static [TokenKind]),
 }
 
+impl From<Token> for ExpectedTokens {
+    fn from(value: Token) -> Self {
+        Self::FullToken(value)
+    }
+}
+
+impl From<TokenKind> for ExpectedTokens {
+    fn from(value: TokenKind) -> Self {
+        Self::Single(value)
+    }
+}
+
+impl From<&'static [TokenKind]> for ExpectedTokens {
+    fn from(value: &'static [TokenKind]) -> Self {
+        Self::OneOf(value)
+    }
+}
+
 impl Display for ExpectedTokens {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -52,6 +70,50 @@ impl Display for ExpectedTokens {
             }
         };
         Ok(())
+    }
+}
+
+pub struct FoundToken(Token);
+
+impl From<Token> for FoundToken {
+    fn from(value: Token) -> Self {
+        Self(value)
+    }
+}
+
+impl From<Option<Token>> for FoundToken {
+    fn from(value: Option<Token>) -> Self {
+        match value {
+            Some(t) => Self::from(t),
+            None => Self(Token::EOF),
+        }
+    }
+}
+
+pub fn unexpected_token<T: Into<FoundToken>, E: Into<ExpectedTokens>>(
+    found: T,
+    expected: E,
+) -> Error {
+    let found = found.into();
+    let expected = expected.into();
+    Error::UnexpectedToken {
+        found: found.0,
+        expected,
+        expected_msg: None,
+    }
+}
+
+pub fn unexpected_token_ms<T: Into<FoundToken>, E: Into<ExpectedTokens>>(
+    found: T,
+    expected: E,
+    msg: &'static str,
+) -> Error {
+    let found = found.into();
+    let expected = expected.into();
+    Error::UnexpectedToken {
+        found: found.0,
+        expected,
+        expected_msg: Some(msg),
     }
 }
 
@@ -464,6 +526,50 @@ impl<T: Parse> Sequence<T> {
         }
 
         Ok(Self { seq })
+    }
+}
+
+// Statement
+pub enum Stmt {
+    Expression(Expr),
+    /// {ident} = {expr};
+    VariableAssignment {
+        name: IdentExpr,
+        value: Expr,
+    },
+}
+
+impl Parse for Stmt {
+    fn parse(tokens: &mut Tokens) -> AResult<Self>
+    where
+        Self: Sized,
+    {
+        let Some(token) = tokens.next() else {
+            return Err(Error::Eof);
+        };
+
+        match token.kind {
+            TokenKind::Ident if tokens.peek().is_some_and(|t| t.is(TokenKind::Equal)) => {
+                // Skip assignment operator
+                tokens.next();
+                let expr = expr(tokens, 0)?;
+                match tokens.next() {
+                    Some(t) if t.is(TokenKind::Colon) => {}
+                    None => {}
+                }
+                return Ok(Self::VariableAssignment {
+                    name: IdentExpr {
+                        ident: tokens.get_span(token.span).to_owned(),
+                    },
+                    value: expr,
+                });
+            }
+            _ => {
+                todo!()
+            }
+        }
+
+        todo!()
     }
 }
 

@@ -52,6 +52,8 @@ pub struct Span {
 }
 
 impl Span {
+    pub const EOF: Self = Self { start: 0, end: 0 };
+
     pub fn concat(self, other: Self) -> Self {
         assert_eq!(self.end, other.start);
         Self {
@@ -68,6 +70,11 @@ pub struct Token {
 }
 
 impl Token {
+    pub const EOF: Self = Self {
+        kind: TokenKind::Eof,
+        span: Span::EOF,
+    };
+
     pub fn new(kind: TokenKind, span: Span) -> Self {
         Self { kind, span }
     }
