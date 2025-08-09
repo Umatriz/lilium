@@ -22,18 +22,16 @@ fn main() {
         println!("--- BEGIN FILE ---\n{content}\n--- END FILE ---");
         let lexer = Lexer::new(&content).unwrap();
         let tokens = lexer.tokens();
-        println!("--- BIGIN LEXING RESULTS ---\n{tokens}\n--- END LEXING RESULTS ---");
+        println!("--- BEGIN LEXING RESULTS ---\n{tokens}\n--- END LEXING RESULTS ---");
     }
 
     if let Some(sub) = matches.subcommand_matches("tree") {
         let code = sub.get_one::<String>("code").unwrap();
-        println!("{code}");
-        println!();
+        println!("--- BEGIN CODE ---\n{code}\n--- END CODE ---");
 
         let lexer = Lexer::new(code).unwrap();
         let tokens = lexer.tokens();
-        println!("Lexed results are:\n{tokens}");
-        println!();
+        println!("--- BEGIN LEXING RESULTS ---\n{tokens}\n--- END LEXING RESULTS ---");
 
         let mut expr = expr(&mut lexer.tokens(), 0).unwrap();
         println!("Tree:");
