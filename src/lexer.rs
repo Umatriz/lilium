@@ -16,6 +16,8 @@ pub enum TokenKind {
     ExplanationMark,
     QuestionMark,
     Colon,
+    /// ;
+    Semi,
     Comma,
 
     Number,
@@ -39,8 +41,6 @@ pub enum TokenKind {
     RightBracket,
     LeftBrace,
     RightBrace,
-
-    NewLine,
 
     Eof,
 }
@@ -238,17 +238,21 @@ fn scan_explicit<'a, C, P, H, L, I, O>(
     local_context: L,
     mut combinator: impl Combinator<I, Output = O>,
 ) where
-    P: Fn(&C) -> I,
+    P: Fn(&mut C) -> &mut I,
+    I: Copy + 'a,
     H: FnOnce(&'a mut C, L, I, O),
 {
     if *matched {
         return;
     }
 
-    let input = (input_extractor)(context);
-    let is_matched = match combinator.process(input) {
+    let is_matched = match combinator.process(*(input_extractor)(context)) {
         Some((i, o)) => {
+            let input = (input_extractor)(context);
+            *input = i;
+
             (handler)(context, local_context, i, o);
+
             true
         }
         None => false,
@@ -261,7 +265,8 @@ fn scan_explicit<'a, C, P, H, L, I, O>(
 
 impl<C, P, H, I, O, L> Scanner<C, P, H, I, O, L>
 where
-    P: Fn(&C) -> I,
+    P: Fn(&mut C) -> &mut I,
+    I: Copy,
     H: FnMut(&mut C, L, I, O),
 {
     pub fn new(context: C, extractor: P, handler: H) -> Self {
@@ -295,10 +300,11 @@ where
 
 impl<C, P, H, I, O, L> Scanner<C, P, H, I, O, L>
 where
-    P: Fn(&C) -> I,
+    P: Fn(&mut C) -> &mut I,
+    I: Copy,
 {
-    pub fn input(&self) -> I {
-        (self.input_extractor)(&self.context)
+    pub fn input(&mut self) -> I {
+        *(self.input_extractor)(&mut self.context)
     }
 
     /// Scan but with a custom handler.
@@ -368,7 +374,7 @@ impl Lexer {
 
         let mut scanner = Scanner::new(
             (&mut inp, &mut tokens),
-            |ctx| *ctx.0,
+            |ctx| ctx.0,
             |ctx, (kind, action), i, o| match action {
                 Skip => {}
                 Push => {
@@ -381,6 +387,7 @@ impl Lexer {
         fn skip_handler<C, L, I, O>(_ctx: C, _local: L, _i: I, _o: O) {}
 
         while !scanner.input().is_empty() {
+            println!("Scanning {}", &scanner.input()[0..1]);
             // Tabs and whitespaces
             scanner.scan(take_while1(|c| c == ' '), (TokenKind::None, Skip));
             scanner.scan(take_while1(|c| c == '\t'), (TokenKind::None, Skip));
@@ -420,6 +427,7 @@ impl Lexer {
             scanner.scan(tag("!"), (TokenKind::ExplanationMark, Push));
             scanner.scan(tag("?"), (TokenKind::QuestionMark, Push));
             scanner.scan(tag(":"), (TokenKind::Colon, Push));
+            scanner.scan(tag(";"), (TokenKind::Semi, Push));
             scanner.scan(tag(","), (TokenKind::Comma, Push));
 
             // Keywords
@@ -458,6 +466,7 @@ impl Lexer {
             );
 
             if !scanner.take_matched() {
+                println!("Unsupported symbol {}", &scanner.input()[0..1]);
                 return Err(LexerError::UnsupportedSymbol(Span { start: 0, end: 1 }));
             }
         }

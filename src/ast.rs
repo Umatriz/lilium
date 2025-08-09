@@ -4,11 +4,10 @@ use crate::lexer::{Token, TokenKind, Tokens};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Unexpected token found {found:?} expected {expected}{}", expected_msg.as_deref().unwrap_or(""))]
+    #[error("Unexpected token found {found:?} expected {expected}")]
     UnexpectedToken {
         found: Token,
-        expected: ExpectedTokens,
-        expected_msg: Option<&'static str>,
+        expected: ExpectedTokensWithMessage,
     },
     #[error("Failed to parse {0}")]
     FailedToParse(Cow<'static, str>),
@@ -24,14 +23,17 @@ pub enum Error {
 
 #[derive(Debug)]
 pub enum ExpectedTokens {
-    FullToken(Token),
     Single(TokenKind),
     OneOf(&'static [TokenKind]),
 }
 
-impl From<Token> for ExpectedTokens {
-    fn from(value: Token) -> Self {
-        Self::FullToken(value)
+impl ExpectedTokens {
+    pub fn check(&self, token: Token) -> bool {
+        use ExpectedTokens::*;
+        match self {
+            Single(token_kind) => token.is(*token_kind),
+            OneOf(token_kinds) => token_kinds.iter().any(|k| token.is(*k)),
+        }
     }
 }
 
@@ -50,9 +52,6 @@ impl From<&'static [TokenKind]> for ExpectedTokens {
 impl Display for ExpectedTokens {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ExpectedTokens::FullToken(token) => {
-                write!(f, "{:?}", token)?;
-            }
             ExpectedTokens::Single(token_kind) => {
                 write!(f, "{:?}", token_kind)?;
             }
@@ -90,31 +89,83 @@ impl From<Option<Token>> for FoundToken {
     }
 }
 
-pub fn unexpected_token<T: Into<FoundToken>, E: Into<ExpectedTokens>>(
-    found: T,
-    expected: E,
-) -> Error {
-    let found = found.into();
-    let expected = expected.into();
-    Error::UnexpectedToken {
-        found: found.0,
-        expected,
-        expected_msg: None,
+#[derive(Debug)]
+pub struct ExpectedTokensWithMessage {
+    pub expected: ExpectedTokens,
+    pub message: Option<Cow<'static, str>>,
+}
+
+impl Display for ExpectedTokensWithMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.expected);
+        if let Some(msg) = self.message.as_ref() {
+            write!(f, " {msg}");
+        }
+        Ok(())
     }
 }
 
-pub fn unexpected_token_ms<T: Into<FoundToken>, E: Into<ExpectedTokens>>(
-    found: T,
-    expected: E,
-    msg: &'static str,
-) -> Error {
-    let found = found.into();
-    let expected = expected.into();
-    Error::UnexpectedToken {
-        found: found.0,
-        expected,
-        expected_msg: Some(msg),
+impl<E, M> From<(E, M)> for ExpectedTokensWithMessage
+where
+    E: Into<ExpectedTokens>,
+    M: Into<Cow<'static, str>>,
+{
+    fn from(value: (E, M)) -> Self {
+        Self {
+            expected: value.0.into(),
+            message: Some(value.1.into()),
+        }
     }
+}
+
+impl<E> From<E> for ExpectedTokensWithMessage
+where
+    E: Into<ExpectedTokens>,
+{
+    fn from(value: E) -> Self {
+        Self {
+            expected: value.into(),
+            message: None,
+        }
+    }
+}
+
+/// This function can be used to expect a token and return an error if it
+/// doesn't match the pattern.
+///
+/// # Examples
+/// ```rust
+/// # use lilium::ast::expect_token;
+/// # use lilium::lexer::{Tokenkind::*, Token};
+/// # let t = Token::EOF;
+/// expect_token(t, (&[Comma, Colon], "This message will be added to the error"));
+/// ```
+pub fn expect_token<T: Into<FoundToken>, E: Into<ExpectedTokensWithMessage>>(
+    token: T,
+    expect: E,
+) -> AResult<Token> {
+    let found = token.into().0;
+    let expected = expect.into();
+    if expected.expected.check(found) {
+        Ok(found)
+    } else {
+        Err(Error::UnexpectedToken { found, expected })
+    }
+}
+
+/// Construct `UnexpectedToken` error.
+///
+/// This function just creates an instance of the error. It **does not** check token
+/// for matching the expected pattern.
+///
+/// See also [`expect_token`].
+pub fn unexpected_token<T: Into<FoundToken>, E: Into<ExpectedTokensWithMessage>>(
+    token: T,
+    expect: E,
+) -> Error {
+    let found = token.into().0;
+    let expected = expect.into();
+    Error::UnexpectedToken { found, expected }
 }
 
 pub type AResult<T, E = Error> = core::result::Result<T, E>;
@@ -185,11 +236,10 @@ impl BinaryOp {
             Star => Self::Mul,
             Slash => Self::Div,
             _ => {
-                return Err(Error::UnexpectedToken {
-                    found: token,
-                    expected: ExpectedTokens::OneOf(&[Plus, Minus, Star, Slash]),
-                    expected_msg: Option::None,
-                });
+                return Err(unexpected_token(
+                    token,
+                    [Plus, Minus, Star, Slash].as_slice(),
+                ));
             }
         };
 
@@ -218,11 +268,10 @@ impl TryFrom<Token> for UnaryOp {
             TokenKind::Plus => UnaryOp::MarkPositive,
             TokenKind::Minus => UnaryOp::Negate,
             _ => {
-                return Err(Error::UnexpectedToken {
-                    found: value,
-                    expected: ExpectedTokens::OneOf(&[TokenKind::Plus, TokenKind::Minus]),
-                    expected_msg: None,
-                });
+                return Err(unexpected_token(
+                    value,
+                    [TokenKind::Plus, TokenKind::Minus].as_slice(),
+                ));
             }
         };
 
@@ -247,20 +296,10 @@ impl Parse for LiteralExp {
     where
         Self: Sized,
     {
-        match tokens.next().cloned() {
-            Some(Token {
-                kind: TokenKind::Literal,
-                span,
-            }) => Ok(Self {
-                literal: tokens.get_span(span).to_owned(),
-            }),
-            Some(t) => Err(Error::UnexpectedToken {
-                found: t,
-                expected: ExpectedTokens::Single(TokenKind::Literal),
-                expected_msg: None,
-            }),
-            None => Err(Error::Eof),
-        }
+        let token = expect_token(tokens.next().cloned(), TokenKind::Literal)?;
+        Ok(Self {
+            literal: tokens.get_span(token.span).to_owned(),
+        })
     }
 }
 
@@ -274,20 +313,10 @@ impl Parse for IntegerExpr {
     where
         Self: Sized,
     {
-        match tokens.next().cloned() {
-            Some(Token {
-                kind: TokenKind::Number,
-                span,
-            }) => Ok(Self {
-                int: tokens.get_span(span).parse::<i32>()?,
-            }),
-            Some(t) => Err(Error::UnexpectedToken {
-                found: t,
-                expected: ExpectedTokens::Single(TokenKind::Number),
-                expected_msg: None,
-            }),
-            None => Err(Error::Eof),
-        }
+        let token = expect_token(tokens.next().cloned(), TokenKind::Number)?;
+        Ok(Self {
+            int: tokens.get_span(token.span).parse::<i32>()?,
+        })
     }
 }
 
@@ -301,20 +330,10 @@ impl Parse for IdentExpr {
     where
         Self: Sized,
     {
-        match tokens.next().cloned() {
-            Some(Token {
-                kind: TokenKind::Ident,
-                span,
-            }) => Ok(Self {
-                ident: tokens.get_span(span).to_owned(),
-            }),
-            Some(t) => Err(Error::UnexpectedToken {
-                found: t,
-                expected: ExpectedTokens::Single(TokenKind::Ident),
-                expected_msg: None,
-            }),
-            None => Err(Error::Eof),
-        }
+        let token = expect_token(tokens.next().cloned(), TokenKind::Ident)?;
+        Ok(Self {
+            ident: tokens.get_span(token.span).to_owned(),
+        })
     }
 }
 
@@ -353,11 +372,13 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
                 })
             }
             _ => {
-                return Err(Error::UnexpectedToken {
-                    found: *token,
-                    expected: ExpectedTokens::OneOf(&[Number, Ident, Literal]),
-                    expected_msg: Some(" or a lambda expression"),
-                });
+                return Err(unexpected_token(
+                    *token,
+                    (
+                        [Number, Ident, Literal].as_slice(),
+                        "or a lambda expression",
+                    ),
+                ));
             }
         };
         Ok(expr)
@@ -481,53 +502,53 @@ pub struct Sequence<T> {
     pub seq: Vec<T>,
 }
 
-impl<T: Parse> Sequence<T> {
-    /// Elements must be separated by the `separator` token.
-    /// Parsing will be stopped when `stop` token is met. Stop-token will **not** be consumed.
-    pub fn parse_till(
-        tokens: &mut Tokens,
-        stop: &Token,
-        separator: Option<&Token>,
-    ) -> AResult<Self> {
-        let mut seq = Vec::new();
+// impl<T: Parse> Sequence<T> {
+//     /// Elements must be separated by the `separator` token.
+//     /// Parsing will be stopped when `stop` token is met. Stop-token will **not** be consumed.
+//     pub fn parse_till(
+//         tokens: &mut Tokens,
+//         stop: &Token,
+//         separator: Option<&Token>,
+//     ) -> AResult<Self> {
+//         let mut seq = Vec::new();
 
-        // Do we expect to see an item right now?
-        let mut is_item = true;
-        loop {
-            let Some(token) = tokens.peek() else {
-                break;
-            };
+//         // Do we expect to see an item right now?
+//         let mut is_item = true;
+//         loop {
+//             let Some(token) = tokens.peek() else {
+//                 break;
+//             };
 
-            if token == stop {
-                break;
-            }
+//             if token == stop {
+//                 break;
+//             }
 
-            if is_item {
-                let item = T::parse(tokens)?;
-                seq.push(item);
-                if separator.is_some() {
-                    is_item = !is_item;
-                }
-            }
+//             if is_item {
+//                 let item = T::parse(tokens)?;
+//                 seq.push(item);
+//                 if separator.is_some() {
+//                     is_item = !is_item;
+//                 }
+//             }
 
-            if let Some(sep) = separator {
-                // PANICS: TODO
-                let token = tokens.next().unwrap();
-                if token == sep {
-                    continue;
-                } else {
-                    return Err(Error::UnexpectedToken {
-                        found: token.clone(),
-                        expected: ExpectedTokens::FullToken(stop.clone()),
-                        expected_msg: None,
-                    });
-                }
-            }
-        }
+//             if let Some(sep) = separator {
+//                 // PANICS: TODO
+//                 let token = tokens.next().unwrap();
+//                 if token == sep {
+//                     continue;
+//                 } else {
+//                     return Err(Error::UnexpectedToken {
+//                         found: token.clone(),
+//                         expected: ExpectedTokens::FullToken(stop.clone()),
+//                         expected_msg: None,
+//                     });
+//                 }
+//             }
+//         }
 
-        Ok(Self { seq })
-    }
-}
+//         Ok(Self { seq })
+//     }
+// }
 
 // Statement
 pub enum Stmt {
@@ -553,11 +574,7 @@ impl Parse for Stmt {
                 // Skip assignment operator
                 tokens.next();
                 let expr = expr(tokens, 0)?;
-                match tokens.next() {
-                    Some(t) if t.is(TokenKind::Colon) => {}
-                    None => {}
-                }
-                return Ok(Self::VariableAssignment {
+                let err = return Ok(Self::VariableAssignment {
                     name: IdentExpr {
                         ident: tokens.get_span(token.span).to_owned(),
                     },
