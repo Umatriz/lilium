@@ -386,7 +386,7 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
 
     use TokenKind::*;
     let mut lhs = eat_atom(tokens)?;
-
+    dbg!(&lhs);
     loop {
         let Some(token) = tokens.peek().cloned() else {
             break;
@@ -405,37 +405,37 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
             tokens.next();
             let rhs = expr(tokens, r_bp)?;
 
-            if token.kind == LambdaStart {
-                let ex = Expr::Lambda(LambdaExpr {
+            let ex = match token.kind {
+                LambdaStart => Expr::Lambda(LambdaExpr {
                     args: Box::new(lhs.flatten_sequence()),
                     body: Box::new(rhs),
-                });
-                lhs = ex;
-                continue;
-            }
-
-            let ex = Expr::Binary(BinaryExpr {
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-                op: BinaryOp::new(token)?,
-            });
+                }),
+                Comma => Expr::Sequence(Sequence {
+                    seq: vec![lhs, rhs],
+                }),
+                _ => Expr::Binary(BinaryExpr {
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                    op: BinaryOp::new(token)?,
+                }),
+            };
             lhs = ex;
 
             continue;
         }
 
-        // Sequence handling
-        match eat_atom(tokens) {
-            Ok(atom) => {
-                lhs = Expr::Sequence(Sequence {
-                    seq: vec![lhs, atom],
-                });
-                continue;
-            }
-            Err(e) => {
-                println!("Sequence parsing error: {e}");
-            }
-        }
+        // // Sequence handling
+        // match eat_atom(tokens) {
+        //     Ok(atom) => {
+        //         lhs = Expr::Sequence(Sequence {
+        //             seq: vec![lhs, atom],
+        //         });
+        //         continue;
+        //     }
+        //     Err(e) => {
+        //         println!("Sequence parsing error: {e}");
+        //     }
+        // }
 
         // if bp.is_none() {
         //     // All previous variants have failed which means it's a sequence
@@ -488,6 +488,7 @@ impl BindingPower {
 fn binding_power(kind: TokenKind) -> AResult<BindingPower> {
     use TokenKind::*;
     let power = match kind {
+        Comma => BindingPower::new().infix(1, 2),
         Plus | Minus => BindingPower::new().prefix(9).infix(5, 6),
         Star | Slash => BindingPower::new().infix(7, 8),
         ExplanationMark | LeftBracket => BindingPower::new().postfix(11),
