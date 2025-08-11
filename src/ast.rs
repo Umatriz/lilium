@@ -136,20 +136,37 @@ where
 /// # Examples
 /// ```rust
 /// # use lilium::ast::expect_token;
-/// # use lilium::lexer::{Tokenkind::*, Token};
+/// # use lilium::lexer::{TokenKind::*, Token};
 /// # let t = Token::EOF;
-/// expect_token(t, (&[Comma, Colon], "This message will be added to the error"));
+/// expect_token(t, ([Comma, Colon].as_slice(), "This message will be added to the error"));
 /// ```
 pub fn expect_token<T: Into<FoundToken>, E: Into<ExpectedTokensWithMessage>>(
-    token: T,
+    found: T,
     expect: E,
 ) -> AResult<Token> {
-    let found = token.into().0;
+    let found = found.into().0;
     let expected = expect.into();
     if expected.expected.check(found) {
         Ok(found)
     } else {
         Err(Error::UnexpectedToken { found, expected })
+    }
+}
+
+pub trait ExpectTokensExt {
+    fn expect_token<E: Into<ExpectedTokensWithMessage>>(&mut self, expect: E) -> AResult<Token>;
+}
+
+impl ExpectTokensExt for Tokens<'_> {
+    fn expect_token<E: Into<ExpectedTokensWithMessage>>(&mut self, expect: E) -> AResult<Token> {
+        let token = self.next().cloned();
+        let found = FoundToken::from(token).0;
+        let expected = expect.into();
+        if expected.expected.check(found) {
+            Ok(found)
+        } else {
+            Err(Error::UnexpectedToken { found, expected })
+        }
     }
 }
 
@@ -180,7 +197,7 @@ pub trait Parse {
 pub enum Expr {
     Binary(BinaryExpr),
     Unary(UnaryExpr),
-    // Block(Vec<Box<Expr>>),
+    Block(BlockExpr),
     Sequence(Sequence<Expr>),
     Lambda(LambdaExpr),
     Literal(LiteralExp),
@@ -337,6 +354,11 @@ impl Parse for IdentExpr {
     }
 }
 
+#[derive(Debug)]
+pub struct BlockExpr {
+    pub statements: Vec<Stmt>,
+}
+
 pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
     fn eat_atom(tokens: &mut Tokens) -> AResult<Expr> {
         let Some(token) = tokens.next() else {
@@ -360,6 +382,18 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
                 let lhs = expr(tokens, 0)?;
                 assert!(tokens.next().is_some_and(|t| t.is(RightParen)));
                 lhs
+            }
+            LeftBrace => {
+                let mut statements = Vec::new();
+                loop {
+                    let statement = Stmt::parse(tokens)?;
+                    statements.push(statement);
+                    if tokens.peek().is_some_and(|t| t.is(TokenKind::RightBrace)) {
+                        break;
+                    }
+                }
+                tokens.expect_token(TokenKind::RightBrace)?;
+                Expr::Block(BlockExpr { statements })
             }
             _ if bp_opt.is_some_and(|bp| bp.prefix.is_some()) => {
                 // PANICS: We can unwrap here because the statement is
@@ -423,30 +457,6 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
 
             continue;
         }
-
-        // // Sequence handling
-        // match eat_atom(tokens) {
-        //     Ok(atom) => {
-        //         lhs = Expr::Sequence(Sequence {
-        //             seq: vec![lhs, atom],
-        //         });
-        //         continue;
-        //     }
-        //     Err(e) => {
-        //         println!("Sequence parsing error: {e}");
-        //     }
-        // }
-
-        // if bp.is_none() {
-        //     // All previous variants have failed which means it's a sequence
-        //     let rhs = dbg!(expr(tokens, 0))?;
-        //     let sequence = Sequence {
-        //         seq: vec![lhs, rhs],
-        //     };
-        //     lhs = Expr::Sequence(sequence);
-
-        //     continue;
-        // }
 
         break;
     }
@@ -551,9 +561,36 @@ pub struct Sequence<T> {
 //     }
 // }
 
-// Statement
+/// {var}: {ty}
+#[derive(Debug)]
+pub struct TypeAssignment {
+    var: IdentExpr,
+    ty: IdentExpr,
+}
+
+impl Parse for TypeAssignment {
+    fn parse(tokens: &mut Tokens) -> AResult<Self>
+    where
+        Self: Sized,
+    {
+        let var = IdentExpr::parse(tokens)?;
+        tokens.expect_token(TokenKind::Colon)?;
+        let ty = IdentExpr::parse(tokens)?;
+        Ok(Self { var, ty })
+    }
+}
+
+/// Statement
+#[derive(Debug)]
 pub enum Stmt {
+    VoidExpression(Expr),
     Expression(Expr),
+    Function {
+        name: IdentExpr,
+        args: Vec<TypeAssignment>,
+        return_type: IdentExpr,
+        body: Expr,
+    },
     /// {ident} = {expr};
     VariableAssignment {
         name: IdentExpr,
@@ -575,12 +612,57 @@ impl Parse for Stmt {
                 // Skip assignment operator
                 tokens.next();
                 let expr = expr(tokens, 0)?;
-                let err = return Ok(Self::VariableAssignment {
+                return Ok(Self::VariableAssignment {
                     name: IdentExpr {
                         ident: tokens.get_span(token.span).to_owned(),
                     },
                     value: expr,
                 });
+            }
+            TokenKind::Def => {
+                let name = IdentExpr::parse(tokens)?;
+
+                tokens.expect_token(TokenKind::Colon)?;
+                tokens.expect_token(TokenKind::Colon)?;
+
+                tokens.expect_token(TokenKind::LeftParen)?;
+                let mut args = Vec::new();
+                loop {
+                    let type_assignment = TypeAssignment::parse(tokens)?;
+                    args.push(type_assignment);
+
+                    let comma = tokens.expect_token(TokenKind::Comma);
+                    match (comma, tokens.peek()) {
+                        // Trailing comma
+                        (Ok(_comma), Some(peek)) if peek.is(TokenKind::LeftParen) => {
+                            break;
+                        }
+                        // No trailing comma
+                        (Err(Error::UnexpectedToken { found, .. }), _)
+                            if found.is(TokenKind::RightParen) =>
+                        {
+                            break;
+                        }
+                        // Comma. We do not care about the peek and letting the next iteration handle any errors
+                        (Ok(_comma), _) => {
+                            continue;
+                        }
+                        // In case of an actuall error return it
+                        (Err(err), _) => {
+                            return Err(err);
+                        }
+                    }
+                }
+                tokens.expect_token(TokenKind::RightParen)?;
+                tokens.expect_token(TokenKind::ArrowRight)?;
+                let return_type = IdentExpr::parse(tokens)?;
+                let body = expr(tokens, 0)?;
+                Self::Function {
+                    name,
+                    args,
+                    return_type,
+                    body,
+                }
             }
             _ => {
                 todo!()

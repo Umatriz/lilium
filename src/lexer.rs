@@ -562,6 +562,14 @@ impl<'a> Tokens<'a> {
         }
         false
     }
+
+    /// Counts the tokens parsed by the closure.
+    pub fn count_tokens<R>(&mut self, fun: impl FnOnce(&mut Self) -> R) -> (usize, R) {
+        let start = self.cursor;
+        let output = fun(self);
+        let count = self.cursor - start;
+        (count, output)
+    }
 }
 
 impl<'a> Iterator for Tokens<'a> {
@@ -593,6 +601,8 @@ impl Display for Tokens<'_> {
 
 #[cfg(test)]
 mod tests {
+    use crate::ast::ExpectTokensExt;
+
     use super::*;
 
     #[test]
@@ -600,7 +610,7 @@ mod tests {
         let o = take_while1(|c| c.is_ascii_digit())("");
         println!("o={o:#?}");
 
-        let lexer = Lexer::new("a  + b *\"literal!!\"");
+        let lexer = Lexer::new("a  + b *\"literal!!\"").unwrap();
         let tokens = lexer.tokens();
         println!("tokens:\n{tokens}");
     }
@@ -645,6 +655,20 @@ mod tests {
     fn take_till_test() {
         let out = take_till(|c| c == '!')("123abc q! qwe");
         assert_eq!(out, Some(("! qwe", "123abc q")));
+    }
+
+    #[test]
+    fn count_tokens_test() {
+        let lexer = Lexer::new("def function :: (a: int) -> int").unwrap();
+        let mut tokens = lexer.tokens();
+        let (count, last_colon) = tokens.count_tokens(|tokens| {
+            tokens.expect_token(TokenKind::Def)?;
+            tokens.expect_token(TokenKind::Ident)?;
+            tokens.expect_token(TokenKind::Colon)?;
+            tokens.expect_token(TokenKind::Colon)
+        });
+        assert_eq!(count, 4);
+        assert!(last_colon.is_ok_and(|t| t.is(TokenKind::Colon)));
     }
 
     // #[test]
