@@ -72,23 +72,6 @@ impl Display for ExpectedTokens {
     }
 }
 
-pub struct FoundToken(Token);
-
-impl From<Token> for FoundToken {
-    fn from(value: Token) -> Self {
-        Self(value)
-    }
-}
-
-impl From<Option<Token>> for FoundToken {
-    fn from(value: Option<Token>) -> Self {
-        match value {
-            Some(t) => Self::from(t),
-            None => Self(Token::EOF),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct ExpectedTokensWithMessage {
     pub expected: ExpectedTokens,
@@ -140,11 +123,11 @@ where
 /// # let t = Token::EOF;
 /// expect_token(t, ([Comma, Colon].as_slice(), "This message will be added to the error"));
 /// ```
-pub fn expect_token<T: Into<FoundToken>, E: Into<ExpectedTokensWithMessage>>(
+pub fn expect_token<T: Into<Token>, E: Into<ExpectedTokensWithMessage>>(
     found: T,
     expect: E,
 ) -> AResult<Token> {
-    let found = found.into().0;
+    let found = found.into();
     let expected = expect.into();
     if expected.expected.check(found) {
         Ok(found)
@@ -155,18 +138,16 @@ pub fn expect_token<T: Into<FoundToken>, E: Into<ExpectedTokensWithMessage>>(
 
 pub trait ExpectTokensExt {
     fn expect_token<E: Into<ExpectedTokensWithMessage>>(&mut self, expect: E) -> AResult<Token>;
+    fn peek_expect<E: Into<ExpectedTokensWithMessage>>(&mut self, expect: E) -> AResult<Token>;
 }
 
 impl ExpectTokensExt for Tokens<'_> {
     fn expect_token<E: Into<ExpectedTokensWithMessage>>(&mut self, expect: E) -> AResult<Token> {
-        let token = self.next().cloned();
-        let found = FoundToken::from(token).0;
-        let expected = expect.into();
-        if expected.expected.check(found) {
-            Ok(found)
-        } else {
-            Err(Error::UnexpectedToken { found, expected })
-        }
+        expect_token(self.next().cloned(), expect)
+    }
+
+    fn peek_expect<E: Into<ExpectedTokensWithMessage>>(&mut self, expect: E) -> AResult<Token> {
+        expect_token(self.peek().cloned(), expect)
     }
 }
 
@@ -176,11 +157,11 @@ impl ExpectTokensExt for Tokens<'_> {
 /// for matching the expected pattern.
 ///
 /// See also [`expect_token`].
-pub fn unexpected_token<T: Into<FoundToken>, E: Into<ExpectedTokensWithMessage>>(
+pub fn unexpected_token<T: Into<Token>, E: Into<ExpectedTokensWithMessage>>(
     token: T,
     expect: E,
 ) -> Error {
-    let found = token.into().0;
+    let found = token.into();
     let expected = expect.into();
     Error::UnexpectedToken { found, expected }
 }
@@ -195,6 +176,7 @@ pub trait Parse {
 
 #[derive(Debug)]
 pub enum Expr {
+    Empty,
     Binary(BinaryExpr),
     Unary(UnaryExpr),
     Block(BlockExpr),
@@ -441,19 +423,29 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
             }
 
             tokens.next();
-            let rhs = expr(tokens, r_bp)?;
+            let rhs = expr(tokens, r_bp);
 
             let ex = match token.kind {
                 LambdaStart => Expr::Lambda(LambdaExpr {
                     args: Box::new(lhs.flatten_sequence()),
-                    body: Box::new(rhs),
+                    body: Box::new(rhs?),
                 }),
-                Comma => Expr::Sequence(Sequence {
-                    seq: vec![lhs, rhs],
-                }),
+                Comma => {
+                    // Trailing comma handling
+                    // If the expression was successfuly parsed that means it is a valid expression and is a part of a sequence.
+                    // If it failed to parse that means it's a trailing comma and right hand side is not valid.
+                    if rhs.is_ok() {
+                        Expr::Sequence(Sequence {
+                            seq: vec![lhs, rhs?],
+                        })
+                        .flatten_sequence()
+                    } else {
+                        lhs
+                    }
+                }
                 _ => Expr::Binary(BinaryExpr {
                     lhs: Box::new(lhs),
-                    rhs: Box::new(rhs),
+                    rhs: Box::new(rhs?),
                     op: BinaryOp::new(token)?,
                 }),
             };
@@ -591,8 +583,8 @@ pub enum Stmt {
     Expr(Expr),
     Function {
         name: IdentExpr,
-        args: Vec<TypeAssignment>,
-        return_type: IdentExpr,
+        args: Option<Vec<TypeAssignment>>,
+        return_type: Option<IdentExpr>,
         body: Expr,
     },
     /// {ident} = {expr};
@@ -629,39 +621,50 @@ impl Parse for Stmt {
                 tokens.expect_token(TokenKind::Colon)?;
                 tokens.expect_token(TokenKind::Colon)?;
 
-                tokens.expect_token(TokenKind::LeftParen)?;
-                let mut args = Vec::new();
-                loop {
-                    let type_assignment = TypeAssignment::parse(tokens)?;
-                    args.push(type_assignment);
+                let args = if tokens.peek_expect(TokenKind::LeftParen).is_ok() {
+                    tokens.next();
+                    let mut args = Vec::new();
+                    loop {
+                        let type_assignment = TypeAssignment::parse(tokens)?;
+                        args.push(type_assignment);
 
-                    let comma = tokens.expect_token(TokenKind::Comma);
-                    match (comma, tokens.peek()) {
-                        // Trailing comma
-                        (Ok(_comma), Some(peek)) if peek.is(TokenKind::LeftParen) => {
-                            // Eat the paren so we can continue parsing
-                            tokens.expect_token(TokenKind::RightParen)?;
-                            break;
-                        }
-                        // No trailing comma
-                        (Err(Error::UnexpectedToken { found, .. }), _)
-                            if found.is(TokenKind::RightParen) =>
-                        {
-                            break;
-                        }
-                        // Comma. We do not care about the peek and letting the next iteration handle any errors
-                        (Ok(_comma), _) => {
-                            continue;
-                        }
-                        // In case of an actuall error return it
-                        (Err(err), _) => {
-                            return Err(err);
+                        let comma = tokens.expect_token(TokenKind::Comma);
+                        match (comma, tokens.peek()) {
+                            // Trailing comma
+                            (Ok(_comma), Some(peek)) if peek.is(TokenKind::LeftParen) => {
+                                // Eat the paren so we can continue parsing
+                                tokens.expect_token(TokenKind::RightParen)?;
+                                break;
+                            }
+                            // No trailing comma
+                            (Err(Error::UnexpectedToken { found, .. }), _)
+                                if found.is(TokenKind::RightParen) =>
+                            {
+                                break;
+                            }
+                            // Comma. We do not care about the peek and letting the next iteration handle any errors
+                            (Ok(_comma), _) => {
+                                continue;
+                            }
+                            // In case of an actuall error return it
+                            (Err(err), _) => {
+                                return Err(err);
+                            }
                         }
                     }
-                }
-                // tokens.expect_token(TokenKind::RightParen)?;
-                tokens.expect_token(TokenKind::ArrowRight)?;
-                let return_type = IdentExpr::parse(tokens)?;
+
+                    Some(args)
+                } else {
+                    None
+                };
+
+                let return_type = if tokens.peek_expect(TokenKind::ArrowRight).is_ok() {
+                    tokens.next();
+                    Some(IdentExpr::parse(tokens)?)
+                } else {
+                    None
+                };
+
                 let body = expr(tokens, 0)?;
                 Ok(Self::Function {
                     name,
@@ -685,6 +688,19 @@ impl Parse for Stmt {
             }
         }
     }
+}
+
+pub fn ast(tokens: &mut Tokens) -> AResult<Vec<Stmt>> {
+    let mut stmts = Vec::new();
+    loop {
+        let stmt = Stmt::parse(tokens)?;
+        stmts.push(stmt);
+
+        if tokens.peek().is_none() {
+            break;
+        }
+    }
+    Ok(stmts)
 }
 
 #[cfg(test)]

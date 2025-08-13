@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{ArgGroup, ArgMatches, Command, arg, value_parser};
 use lilium::{
-    ast::{Expr, Parse, Stmt, expr},
+    ast::{self, Expr, Parse, Stmt, expr},
     lexer::Lexer,
 };
 
@@ -52,7 +52,7 @@ fn main() {
         let mut tokens = lexer.tokens();
         println!("--- BEGIN LEXING RESULTS ---\n{tokens}\n--- END LEXING RESULTS ---");
 
-        let mut expr = match Stmt::parse(&mut tokens) {
+        let expr = match ast::ast(&mut tokens) {
             Ok(e) => e,
             Err(lilium::ast::Error::UnexpectedToken { found, expected }) => {
                 let span = found.span;

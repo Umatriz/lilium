@@ -84,6 +84,15 @@ impl Token {
     }
 }
 
+impl From<Option<Token>> for Token {
+    fn from(value: Option<Token>) -> Self {
+        match value {
+            Some(t) => t,
+            None => Self::EOF,
+        }
+    }
+}
+
 /// Returns (rest, tag).
 // TODO: Use custom result.
 pub fn tag(tag: &str) -> impl Fn(&str) -> Option<(&str, &str)> {
