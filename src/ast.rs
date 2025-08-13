@@ -396,8 +396,8 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
                 Expr::Block(BlockExpr { statements })
             }
             _ if bp_opt.is_some_and(|bp| bp.prefix.is_some()) => {
-                // PANICS: We can unwrap here because the statement is
-                // unreachable unless it's `Some`.
+                // PANICS: We can unwrap here because this branch is
+                // unreachable unless `bp` is `Some`.
                 let right_bp = bp_opt.and_then(|bp| bp.prefix).unwrap();
                 let rhs = expr(tokens, right_bp)?;
                 Expr::Unary(UnaryExpr {
@@ -426,6 +426,10 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
             break;
         };
         if token.kind == Eof {
+            break;
+        }
+
+        if token.is(TokenKind::Semi) {
             break;
         }
 
@@ -583,8 +587,8 @@ impl Parse for TypeAssignment {
 /// Statement
 #[derive(Debug)]
 pub enum Stmt {
-    VoidExpression(Expr),
-    Expression(Expr),
+    TerminatedExpr(Expr),
+    Expr(Expr),
     Function {
         name: IdentExpr,
         args: Vec<TypeAssignment>,
@@ -612,12 +616,12 @@ impl Parse for Stmt {
                 // Skip assignment operator
                 tokens.next();
                 let expr = expr(tokens, 0)?;
-                return Ok(Self::VariableAssignment {
+                Ok(Self::VariableAssignment {
                     name: IdentExpr {
                         ident: tokens.get_span(token.span).to_owned(),
                     },
                     value: expr,
-                });
+                })
             }
             TokenKind::Def => {
                 let name = IdentExpr::parse(tokens)?;
@@ -635,6 +639,8 @@ impl Parse for Stmt {
                     match (comma, tokens.peek()) {
                         // Trailing comma
                         (Ok(_comma), Some(peek)) if peek.is(TokenKind::LeftParen) => {
+                            // Eat the paren so we can continue parsing
+                            tokens.expect_token(TokenKind::RightParen)?;
                             break;
                         }
                         // No trailing comma
@@ -653,23 +659,31 @@ impl Parse for Stmt {
                         }
                     }
                 }
-                tokens.expect_token(TokenKind::RightParen)?;
+                // tokens.expect_token(TokenKind::RightParen)?;
                 tokens.expect_token(TokenKind::ArrowRight)?;
                 let return_type = IdentExpr::parse(tokens)?;
                 let body = expr(tokens, 0)?;
-                Self::Function {
+                Ok(Self::Function {
                     name,
                     args,
                     return_type,
                     body,
-                }
+                })
             }
             _ => {
-                todo!()
+                // Put the unknown token back
+                tokens.move_cursor_to(tokens.cursor() - 1);
+                let expr = expr(tokens, 0)?;
+                let peek = tokens.peek();
+                match peek {
+                    Some(token) if token.is(TokenKind::Semi) => {
+                        tokens.expect_token(TokenKind::Semi)?;
+                        Ok(Self::TerminatedExpr(expr))
+                    }
+                    _ => Ok(Self::Expr(expr)),
+                }
             }
         }
-
-        todo!()
     }
 }
 

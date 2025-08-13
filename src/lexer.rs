@@ -47,8 +47,8 @@ pub enum TokenKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
-    start: usize,
-    end: usize,
+    pub start: usize,
+    pub end: usize,
 }
 
 impl Span {
