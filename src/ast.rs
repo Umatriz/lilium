@@ -185,9 +185,11 @@ pub enum Expr {
     Literal(LiteralExp),
     Integer(IntegerExpr),
     Ident(IdentExpr),
+    FunctionCall(FunctionCallExpr),
 }
 
 impl Expr {
+    /// Flatten sequence
     pub fn flatten_sequence(self) -> Self {
         fn flatten(buffer: &mut Vec<Expr>, sequence: Expr) -> Option<()> {
             match sequence {
@@ -341,6 +343,24 @@ pub struct BlockExpr {
     pub statements: Vec<Stmt>,
 }
 
+#[derive(Debug)]
+pub struct FunctionCallExpr {
+    pub callee: Box<Expr>,
+    pub args: Sequence<Expr>,
+}
+
+impl FunctionCallExpr {
+    fn parse_args(tokens: &mut Tokens) -> AResult<Sequence<Expr>> {
+        let args = expr(tokens, 0)?;
+        let args = match args {
+            Expr::Sequence(seq) => seq,
+            Expr::Empty => Sequence { seq: Vec::new() },
+            expr => Sequence { seq: vec![expr] },
+        };
+        Ok(args)
+    }
+}
+
 pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
     fn eat_atom(tokens: &mut Tokens) -> AResult<Expr> {
         let Some(token) = tokens.next() else {
@@ -354,15 +374,36 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
             Number => Expr::Integer(IntegerExpr {
                 int: tokens.get_span(token.span).to_owned().parse()?,
             }),
+            Ident if tokens.peek_expect(TokenKind::LeftParen).is_ok() => {
+                let callee = Expr::Ident(IdentExpr {
+                    ident: tokens.get_span(token.span).to_owned(),
+                });
+                let args = FunctionCallExpr::parse_args(tokens)?;
+                Expr::FunctionCall(FunctionCallExpr {
+                    callee: Box::new(callee),
+                    args,
+                })
+            }
             Ident => Expr::Ident(IdentExpr {
                 ident: tokens.get_span(token.span).to_owned(),
             }),
             Literal => Expr::Literal(LiteralExp {
                 literal: tokens.get_span(token.span).to_owned(),
             }),
+            LeftParen if tokens.peek_expect(TokenKind::RightParen).is_ok() => {
+                tokens.next();
+                Expr::Empty
+            }
             LeftParen => {
-                let lhs = expr(tokens, 0)?;
-                assert!(tokens.next().is_some_and(|t| t.is(RightParen)));
+                let mut lhs = expr(tokens, 0)?;
+                tokens.expect_token(TokenKind::RightParen)?;
+                if tokens.peek_expect(TokenKind::LeftParen).is_ok() {
+                    let args = FunctionCallExpr::parse_args(tokens)?;
+                    lhs = Expr::FunctionCall(FunctionCallExpr {
+                        callee: Box::new(lhs),
+                        args,
+                    })
+                }
                 lhs
             }
             LeftBrace => {
