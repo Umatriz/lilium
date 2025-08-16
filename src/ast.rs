@@ -402,7 +402,6 @@ pub fn expr(tokens: &mut Tokens, min_bp: u8) -> AResult<Expr> {
 
     use TokenKind::*;
     let mut lhs = eat_atom(tokens)?;
-    dbg!(&lhs);
     loop {
         let Some(token) = tokens.peek().cloned() else {
             break;
@@ -608,6 +607,10 @@ impl Parse for Stmt {
                 // Skip assignment operator
                 tokens.next();
                 let expr = expr(tokens, 0)?;
+                tokens.expect_token((
+                    TokenKind::Semi,
+                    "variable assignment must end with a semicolon",
+                ))?;
                 Ok(Self::VariableAssignment {
                     name: IdentExpr {
                         ident: tokens.get_span(token.span).to_owned(),

@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use ariadne::{Config, Label, Report, ReportKind, Source};
 use clap::{ArgGroup, ArgMatches, Command, arg, value_parser};
 use lilium::{
     ast::{self, Expr, Parse, Stmt, expr},
@@ -56,11 +57,18 @@ fn main() {
             Ok(e) => e,
             Err(lilium::ast::Error::UnexpectedToken { found, expected }) => {
                 let span = found.span;
-                println!("UNEXPECTED TOKEN: {}", &content[span.start..span.end]);
-                panic!(
-                    "ERROR: {}",
-                    lilium::ast::Error::UnexpectedToken { found, expected }
-                )
+                Report::build(ReportKind::Error, ("content", span.start..span.end))
+                    .with_config(Config::new().with_color(false))
+                    .with_code(1)
+                    .with_message("Unexpected token")
+                    .with_label(
+                        Label::new(("content", span.start..span.end))
+                            .with_message(format!("Expected {expected}")),
+                    )
+                    .finish()
+                    .print(("content", Source::from(content)))
+                    .unwrap();
+                return;
             }
             Err(err) => panic!("ERROR: {err}"),
         };
