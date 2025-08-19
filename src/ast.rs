@@ -4,8 +4,6 @@ use std::{
     num::ParseIntError,
 };
 
-use pretty::{DocAllocator, DocBuilder, Pretty, docs};
-
 use crate::lexer::{Token, TokenKind, Tokens};
 
 #[derive(Debug, thiserror::Error)]
@@ -218,15 +216,6 @@ impl Expr {
     }
 }
 
-impl<'a, D> Pretty<'a, D> for Expr
-where
-    D: DocAllocator<'a>,
-{
-    fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
-        todo!()
-    }
-}
-
 impl Debug for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -251,40 +240,12 @@ pub struct BinaryExpr {
     pub op: BinaryOp,
 }
 
-impl<'a, D> Pretty<'a, D> for BinaryExpr
-where
-    D: DocAllocator<'a>,
-{
-    fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
-        allocator
-            .text("Binary")
-            .append(self.op.pretty(allocator).backets())
-            .append(
-                self.lhs
-                    .pretty(allocator)
-                    .append(self.rhs.pretty(allocator))
-                    .parens(),
-            )
-    }
-}
-
 #[derive(Debug)]
 pub enum BinaryOp {
     Add,
     Sub,
     Mul,
     Div,
-}
-
-impl<'a, D: DocAllocator<'a>> Pretty<'a, D> for BinaryOp {
-    fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
-        match self {
-            BinaryOp::Add => allocator.text("Add").append(allocator.text("+").brackets()),
-            BinaryOp::Sub => allocator.text("Sub").append(allocator.text("-").brackets()),
-            BinaryOp::Mul => allocator.text("Mul").append(allocator.text("*").brackets()),
-            BinaryOp::Div => allocator.text("Div").append(allocator.text("/").brackets()),
-        }
-    }
 }
 
 impl BinaryOp {
@@ -313,29 +274,11 @@ pub struct UnaryExpr {
     pub op: UnaryOp,
 }
 
-impl<'a, D: DocAllocator<'a>> Pretty<'a, D> for UnaryExpr {
-    fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
-        allocator
-            .text("Unary")
-            .append(self.op.pretty(allocator).braces())
-            .append(self.item.pretty(allocator).parens())
-    }
-}
-
 #[derive(Debug)]
 pub enum UnaryOp {
     // TODO: Maybe change the name...
     MarkPositive,
     Negate,
-}
-
-impl<'a, D: DocAllocator<'a>> Pretty<'a, D> for UnaryOp {
-    fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
-        match self {
-            UnaryOp::MarkPositive => allocator.text("Pos").append(allocator.text("+").brackets()),
-            UnaryOp::Negate => allocator.text("Neg").append(allocator.text("-").brackets()),
-        }
-    }
 }
 
 impl TryFrom<Token> for UnaryOp {
@@ -362,20 +305,6 @@ pub struct LambdaExpr {
     pub args: Box<Expr>,
     pub body: Box<Expr>,
 }
-
-// impl<'a, D: DocAllocator<'a>> Pretty<'a, D> for LambdaExpr {
-//     fn pretty(self, allocator: &'a D) -> DocBuilder<'a, D, ()> {
-//         docs![
-//             "Lambda",
-//             allocator.space(),
-//             "{",
-//             allocator.softline_(),
-//             self.args,
-//             allocator.softline_(),
-//             "}",
-//         ]
-//     }
-// }
 
 #[derive(Debug)]
 pub struct LiteralExp {
