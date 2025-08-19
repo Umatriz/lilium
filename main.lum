@@ -11,3 +11,7 @@ def main :: {
 
     println("Hello! ", a, " plus ", b, " equals to ", c);
 }
+
+def test :: {
+    println("Test for commit");
+}
